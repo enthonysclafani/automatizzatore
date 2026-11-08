@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/enthonysclafani/automatizzatore/internal/store"
@@ -20,6 +21,8 @@ type Workspace struct {
 	Vault    *vault.Vault
 	ID       string
 	Fallback Provider
+	// FallbackAllowed says which names may be read from Fallback; nil allows none.
+	FallbackAllowed func(name string) bool
 	// Actor and RunID describe who reads, for the audit log.
 	Actor string
 	RunID string
@@ -34,10 +37,17 @@ func (w Workspace) Get(name string) (string, error) {
 	defer cancel()
 	sealed, err := w.Store.GetSecret(ctx, w.ID, name)
 	if errors.Is(err, store.ErrNotFound) {
-		if w.Fallback == nil {
-			return "", ErrNotFound
+		if w.Fallback == nil || w.FallbackAllowed == nil || !w.FallbackAllowed(name) {
+			return "", fmt.Errorf("%w: save it on the Secrets page of workspace %s", ErrNotFound, w.ID)
 		}
-		return w.Fallback.Get(name)
+		v, err := w.Fallback.Get(name)
+		if err == nil {
+			_ = w.Store.Audit(ctx, store.AuditEntry{
+				At: time.Now(), Actor: w.Actor, Action: "secret.read", Workspace: w.ID, Target: name,
+				Detail: map[string]any{"run": w.RunID, "source": "instance"},
+			})
+		}
+		return v, err
 	}
 	if err != nil {
 		return "", err

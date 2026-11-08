@@ -1,6 +1,6 @@
 import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
 import { api, isApiError } from "../api/client";
-import type { Approval, Run, RunStatus } from "../api/types";
+import type { Approval, Draft, Run, RunStatus } from "../api/types";
 
 /** Fast polling while something is running, slow otherwise. */
 export const POLL_ACTIVE_MS = 5000;
@@ -31,6 +31,13 @@ export const keys = {
   approvalList: (ws: string, status: string) => ["ws", ws, "approvals", status] as const,
   connections: (ws: string) => ["ws", ws, "connections"] as const,
   settings: (ws: string) => ["ws", ws, "settings"] as const,
+  builder: (ws: string) => ["ws", ws, "builder"] as const,
+  drafts: (ws: string) => ["ws", ws, "drafts"] as const,
+  draftList: (ws: string, tab: DraftTab) => ["ws", ws, "drafts", tab] as const,
+  draft: (ws: string, id: string) => ["ws", ws, "draft", id] as const,
+  // Under automation(ws, name), so refreshing an automation refreshes its versions too.
+  versions: (ws: string, name: string) => ["ws", ws, "automation", name, "versions"] as const,
+  version: (ws: string, name: string, hash: string) => ["ws", ws, "automation", name, "version", hash] as const,
   connectors: ["connectors"] as const,
   users: ["users"] as const,
   system: ["system"] as const,
@@ -153,6 +160,61 @@ export function settingsQuery(ws: string) {
   return queryOptions({
     queryKey: keys.settings(ws),
     queryFn: () => api.getSettings(ws),
+  });
+}
+
+/** The builder's state and templates; changes only with the server configuration. */
+export function builderQuery(ws: string) {
+  return queryOptions({
+    queryKey: keys.builder(ws),
+    queryFn: () => api.builder(ws),
+    staleTime: 60_000,
+  });
+}
+
+/** "open": being written or waiting for an admin. "closed": activated or discarded. */
+export type DraftTab = "open" | "closed";
+
+export function draftsQuery(ws: string, tab: DraftTab) {
+  return queryOptions({
+    queryKey: keys.draftList(ws, tab),
+    queryFn: async (): Promise<{ drafts: Draft[] }> => {
+      if (tab === "open") return api.listDrafts(ws);
+      const [activated, discarded] = await Promise.all([
+        api.listDrafts(ws, "activated"),
+        api.listDrafts(ws, "discarded"),
+      ]);
+      const drafts = [...activated.drafts, ...discarded.drafts].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      return { drafts };
+    },
+    refetchInterval: POLL_IDLE_MS,
+  });
+}
+
+/** While the builder works on the draft, poll to show its progress (the user message is saved first). */
+export const POLL_BUSY_MS = 3000;
+
+export function draftQuery(ws: string, id: string) {
+  return queryOptions({
+    queryKey: keys.draft(ws, id),
+    queryFn: () => api.getDraft(ws, id),
+    refetchInterval: (q) => (q.state.data?.busy ? POLL_BUSY_MS : POLL_IDLE_MS),
+  });
+}
+
+export function versionsQuery(ws: string, name: string) {
+  return queryOptions({
+    queryKey: keys.versions(ws, name),
+    queryFn: () => api.listVersions(ws, name),
+  });
+}
+
+/** A version never changes: its hash is its content. */
+export function versionQuery(ws: string, name: string, hash: string) {
+  return queryOptions({
+    queryKey: keys.version(ws, name, hash),
+    queryFn: () => api.getVersion(ws, name, hash),
+    staleTime: Infinity,
   });
 }
 

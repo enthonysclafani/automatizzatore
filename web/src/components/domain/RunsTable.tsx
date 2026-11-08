@@ -54,13 +54,18 @@ export function RunsTable({ ws, runs, showAutomation = true }: { ws: string; run
               </Td>
               {showAutomation && (
                 <Td className="max-w-[16rem] truncate font-medium text-fg">
-                  <Link
-                    to="/w/$ws/automations/$name"
-                    params={{ ws, name: r.automation }}
-                    className="hover:underline"
-                  >
-                    {r.automation}
-                  </Link>
+                  {r.triggerType === "dry_run" ? (
+                    // A dry run tests a draft, which may not be an automation yet.
+                    r.automation
+                  ) : (
+                    <Link
+                      to="/w/$ws/automations/$name"
+                      params={{ ws, name: r.automation }}
+                      className="hover:underline"
+                    >
+                      {r.automation}
+                    </Link>
+                  )}
                 </Td>
               )}
               <Td className="whitespace-nowrap text-fg-2">

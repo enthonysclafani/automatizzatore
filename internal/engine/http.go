@@ -81,7 +81,7 @@ func (ex *execution) execHTTP(ctx context.Context, st *manifest.Step, env expr.E
 	}
 
 	start := time.Now()
-	resp, err := ex.e.httpClient().Do(httpReq)
+	resp, err := ex.httpClient().Do(httpReq)
 	if err != nil {
 		return stepOutcome{input: input, err: fmt.Errorf("request failed: %w", err)}
 	}

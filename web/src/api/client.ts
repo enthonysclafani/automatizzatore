@@ -7,12 +7,19 @@ import type {
   AuditEntry,
   AutomationDetail,
   AutomationSummary,
+  AutomationVersion,
   Autonomy,
+  BuilderStatus,
   Connection,
   ConnectionInput,
   ConnectionTest,
   ConnectorCatalog,
   Costs,
+  CreateDraftInput,
+  Draft,
+  DraftDetail,
+  DraftStatus,
+  DryRunStarted,
   LoginRequest,
   Me,
   Member,
@@ -27,6 +34,7 @@ import type {
   SetupStatus,
   SystemInfo,
   User,
+  VersionList,
   WorkspaceRef,
   WorkspaceSettings,
 } from "./types";
@@ -146,6 +154,9 @@ export interface SettingsPatch {
   maxAutonomy?: Autonomy;
 }
 
+/** Without a status the server lists open and proposed drafts. */
+export type DraftListStatus = DraftStatus | "all";
+
 export interface UserPatch {
   name?: string;
   disabled?: boolean;
@@ -225,6 +236,33 @@ export const api = {
     request<Approval>("POST", `${ws(w)}/approvals/${enc(id)}/approve`, comment ? { comment } : {}),
   reject: (w: string, id: string, comment?: string) =>
     request<Approval>("POST", `${ws(w)}/approvals/${enc(id)}/reject`, comment ? { comment } : {}),
+
+  // AI builder
+  builder: (w: string) => request<BuilderStatus>("GET", `${ws(w)}/builder`),
+  listDrafts: (w: string, status?: DraftListStatus) =>
+    request<{ drafts: Draft[] }>("GET", `${ws(w)}/drafts${qs({ status })}`),
+  /** Slow (10-90 s) when body.message is set: the model writes the first version. */
+  createDraft: (w: string, body: CreateDraftInput) => request<DraftDetail>("POST", `${ws(w)}/drafts`, body),
+  getDraft: (w: string, id: string) => request<DraftDetail>("GET", `${ws(w)}/drafts/${enc(id)}`),
+  /** Slow like createDraft: one builder turn. */
+  sendDraftMessage: (w: string, id: string, text: string) =>
+    request<DraftDetail>("POST", `${ws(w)}/drafts/${enc(id)}/messages`, { text }),
+  /** Replaces every file of the draft; the answer carries the new problems. */
+  putDraftFiles: (w: string, id: string, files: Record<string, string>) =>
+    request<DraftDetail>("PUT", `${ws(w)}/drafts/${enc(id)}/files`, { files }),
+  /** Starts the run in the background; poll getRun until it ends. */
+  dryRunDraft: (w: string, id: string, triggerData?: Record<string, unknown>) =>
+    request<DryRunStarted>("POST", `${ws(w)}/drafts/${enc(id)}/dry-run`, triggerData ? { triggerData } : {}),
+  proposeDraft: (w: string, id: string) => request<DraftDetail>("POST", `${ws(w)}/drafts/${enc(id)}/propose`),
+  discardDraft: (w: string, id: string, comment?: string) =>
+    request<DraftDetail>("POST", `${ws(w)}/drafts/${enc(id)}/discard`, comment ? { comment } : {}),
+  /** hash: the version of the files the admin reviewed; 409 "changed" if the draft moved on since. */
+  activateDraft: (w: string, id: string, hash: string, comment?: string) =>
+    request<DraftDetail>("POST", `${ws(w)}/drafts/${enc(id)}/activate`, comment ? { hash, comment } : { hash }),
+  listVersions: (w: string, name: string) =>
+    request<VersionList>("GET", `${ws(w)}/automations/${enc(name)}/versions`),
+  getVersion: (w: string, name: string, hash: string) =>
+    request<AutomationVersion>("GET", `${ws(w)}/automations/${enc(name)}/versions/${enc(hash)}`),
 
   // Workspace settings
   getSettings: (w: string) => request<WorkspaceSettings>("GET", `${ws(w)}/settings`),

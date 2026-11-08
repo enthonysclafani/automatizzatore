@@ -8,7 +8,7 @@ import { runNote } from "../components/domain/RunsTable";
 import { dotColor, type Tone } from "../components/ui/Badge";
 import { Card, CardBody, CardHeader } from "../components/ui/Card";
 import { cx } from "../components/ui/cx";
-import { IconCheckCircle, IconChevronRight, IconClock, IconHourglass } from "../components/ui/icons";
+import { IconCheckCircle, IconChevronRight, IconClock, IconHourglass, IconSparkle } from "../components/ui/icons";
 import { Page, PageHeader } from "../components/ui/Page";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/States";
 import { StatusIcon } from "../components/ui/StatusBadge";
@@ -16,7 +16,8 @@ import { RelativeTime } from "../components/ui/Time";
 import { formatAbsolute, formatEur, formatInt } from "../lib/format";
 import { overviewQuery } from "../lib/queries";
 import { useMe } from "../lib/queries";
-import { useWs } from "./WorkspaceGate";
+import { atLeast } from "../lib/roles";
+import { useWs, useWsRole } from "./WorkspaceGate";
 
 export function OverviewPage() {
   const ws = useWs();
@@ -62,6 +63,10 @@ function OverviewBody({ ws, data }: { ws: string; data: Overview }) {
   const a = data.automations;
   const r = data.runs24h;
   const monthName = new Intl.DateTimeFormat(undefined, { month: "long" }).format(new Date());
+  const role = useWsRole();
+  // Only builders and up can open the builder; admins and owners activate.
+  const showProposed = data.proposedDrafts > 0 && atLeast(role, "builder");
+  const canActivate = atLeast(role, "admin");
   return (
     <div className="space-y-4">
       {data.waitingApprovals > 0 && (
@@ -81,6 +86,30 @@ function OverviewBody({ ws, data }: { ws: string; data: Overview }) {
           </span>
           <span className="flex shrink-0 items-center gap-1 text-[13px] font-medium text-accent">
             Review <IconChevronRight size={14} />
+          </span>
+        </Link>
+      )}
+      {showProposed && (
+        <Link
+          to="/w/$ws/builder"
+          params={{ ws }}
+          className="flex items-center gap-3 rounded-lg border-2 border-[var(--st-orange-dot)]/60 bg-[var(--st-orange-bg)] px-4 py-3 hover:border-[var(--st-orange-dot)]"
+        >
+          <IconSparkle size={20} className="shrink-0 text-[var(--st-orange-fg)]" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-[var(--st-orange-fg)]">
+              {data.proposedDrafts === 1
+                ? "1 draft is waiting for activation"
+                : `${formatInt(data.proposedDrafts)} drafts are waiting for activation`}
+            </span>
+            <span className="block text-[12.5px] text-fg-2">
+              {canActivate
+                ? "Builders proposed them. Check each one and activate it, or discard it."
+                : "An admin has to activate them before they run."}
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1 text-[13px] font-medium text-accent">
+            {canActivate ? "Review" : "Open"} <IconChevronRight size={14} />
           </span>
         </Link>
       )}

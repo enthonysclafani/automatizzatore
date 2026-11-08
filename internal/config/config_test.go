@@ -59,3 +59,18 @@ func TestEmptyFileMeansDefaults(t *testing.T) {
 		t.Fatalf("cfg = %+v, err = %v", cfg, err)
 	}
 }
+
+func TestReservedSecrets(t *testing.T) {
+	cfg := Defaults()
+	cfg.Runner.Token = "secret://runner-token"
+	cfg.Providers = map[string]Provider{"anthropic": {Type: "anthropic", APIKey: "secret://anthropic-api-key"}}
+	r := cfg.ReservedSecrets()
+	for _, n := range []string{"runner-token", "anthropic-api-key", "pendolo-master-key"} {
+		if !r[n] {
+			t.Errorf("%s not reserved: %v", n, r)
+		}
+	}
+	if r["alerts-webhook"] {
+		t.Error("an automation secret is reserved")
+	}
+}

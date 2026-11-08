@@ -31,6 +31,7 @@ type draftResp struct {
 	Messages    []store.DraftMessage
 	BaseFiles   map[string]string
 	CurrentHash string
+	Busy        bool
 }
 
 func answerJSON(t *testing.T, reply string, files map[string]string) string {
@@ -56,7 +57,8 @@ func (e *env) withBuilder(script *testfakes.Script) {
 	gw := llm.NewWith(map[string]llm.Provider{"fake": script}, map[string]config.Model{"smart": {Provider: "fake", Model: "fake-1"}})
 	e.api.Builder = &builder.Builder{LLM: gw, Model: "smart", TempDir: filepath.Join(e.api.Config.DataDir, "tmp")}
 	e.api.Config.Models = map[string]config.Model{"smart": {Provider: "fake", Model: "fake-1"}}
-	e.api.Engine = &engine.Engine{Store: e.store, LLM: gw, Connectors: e.api.Hub, Log: e.api.Log}
+	// Tests serve "public" sites on localhost.
+	e.api.Engine = &engine.Engine{Store: e.store, LLM: gw, Connectors: e.api.Hub, Log: e.api.Log, DryRunHTTP: http.DefaultClient}
 }
 
 func waitRun(t *testing.T, st *store.Store, id string) *store.Run {
@@ -110,7 +112,7 @@ steps:
 	if code := bld.do("POST", "/api/v1/workspaces/ws-a/drafts", map[string]string{"message": "Controlla il sito ogni mattina alle 8"}, &d); code != 201 {
 		t.Fatalf("create = %d", code)
 	}
-	if d.Automation != "site-watch" || d.Status != store.DraftOpen || builder.HasErrors(d.Problems) || d.Files["automation.yaml"] != good {
+	if d.Automation != "site-watch" || d.Status != store.DraftOpen || d.Busy || builder.HasErrors(d.Problems) || d.Files["automation.yaml"] != good {
 		t.Fatalf("draft = %+v", d)
 	}
 	if len(script.SeenComplete) != 2 || !strings.Contains(script.SeenComplete[1].User, "Pendolo found problems") {
@@ -148,7 +150,9 @@ steps:
 	if ov2.ProposedDrafts != 1 {
 		t.Fatalf("proposed = %d", ov2.ProposedDrafts)
 	}
-	if code := owner.do("POST", base+"/activate", map[string]string{"comment": "ok"}, &d); code != 200 || d.Status != store.DraftActivated {
+	owner.expect("POST", base+"/activate", map[string]string{"comment": "no hash"}, 400)
+	owner.expect("POST", base+"/activate", map[string]string{"hash": "0123456789abcdef"}, 409)
+	if code := owner.do("POST", base+"/activate", map[string]string{"hash": d.Hash, "comment": "ok"}, &d); code != 200 || d.Status != store.DraftActivated {
 		t.Fatalf("activate = %d %+v", code, d)
 	}
 	written, err := os.ReadFile(filepath.Join(e.autos, "site-watch", "automation.yaml"))
@@ -187,15 +191,15 @@ steps:
 	if !builder.HasErrors(rn.Problems) {
 		t.Fatalf("rename accepted: %+v", rn.Problems)
 	}
-	owner.expect("POST", "/api/v1/workspaces/ws-a/drafts/"+ed2.ID+"/activate", nil, 409)
-	owner.expect("POST", "/api/v1/workspaces/ws-a/drafts/"+ed.ID+"/activate", nil, 200)
+	owner.expect("POST", "/api/v1/workspaces/ws-a/drafts/"+ed2.ID+"/activate", map[string]string{"hash": rn.Hash}, 409)
+	owner.expect("POST", "/api/v1/workspaces/ws-a/drafts/"+ed.ID+"/activate", map[string]string{"hash": ed.Hash}, 200)
 	owner.do("GET", "/api/v1/workspaces/ws-a/automations/site-watch/versions", nil, &vers)
 	if len(vers.Versions) != 2 || vers.Current == au.Hash {
 		t.Fatalf("versions after edit = %+v", vers)
 	}
-	bld.expect("PUT", "/api/v1/workspaces/ws-a/drafts/"+ed2.ID+"/files", map[string]any{"files": map[string]string{"automation.yaml": changed}}, 200)
+	bld.do("PUT", "/api/v1/workspaces/ws-a/drafts/"+ed2.ID+"/files", map[string]any{"files": map[string]string{"automation.yaml": changed}}, &ed2)
 	var stale errBody
-	if code := owner.do("POST", "/api/v1/workspaces/ws-a/drafts/"+ed2.ID+"/activate", nil, &stale); code != 409 || !strings.Contains(stale.Error, "changed since") {
+	if code := owner.do("POST", "/api/v1/workspaces/ws-a/drafts/"+ed2.ID+"/activate", map[string]string{"hash": ed2.Hash}, &stale); code != 409 || !strings.Contains(stale.Error, "changed since") {
 		t.Fatalf("stale activate = %d %+v", code, stale)
 	}
 

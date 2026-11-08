@@ -20,7 +20,11 @@ import (
 const maxHookBody = 1 << 20
 
 // hiddenHeaders are never stored with a webhook run.
-var hiddenHeaders = map[string]bool{"authorization": true, "cookie": true, "x-pendolo-signature": true, "x-hub-signature-256": true, "x-hub-signature": true}
+var hiddenHeaders = map[string]bool{
+	"authorization": true, "proxy-authorization": true, "cookie": true,
+	"x-pendolo-signature": true, "x-hub-signature-256": true, "x-hub-signature": true,
+	"x-gitlab-token": true, "x-api-key": true, "x-auth-token": true,
+}
 
 // handleHook queues a run of the automation named in the path. The caller
 // proves it knows the trigger's secret with "Authorization: Bearer <secret>"

@@ -150,7 +150,7 @@ All step types run. `foreach` runs up to `concurrency` items at a time (default 
 
 ## Secrets
 
-Never write a secret in a manifest. Refer to it as `secret://<name>`; the value is injected into the step that uses it at run time, never into a model's context, and masked in logs.
+Never write a secret in a manifest. Refer to it as `secret://<name>`; the value is injected into the step that uses it at run time, never into a model's context, and masked in logs. Pendolo looks for the name among the workspace's secrets (the Secrets page), then among the instance's files and environment: the `default` workspace may use all of those, other workspaces only the ones in `secrets.shared` (see [configuration.md](configuration.md)). Dry runs never resolve secrets.
 
 ## What the validator checks
 

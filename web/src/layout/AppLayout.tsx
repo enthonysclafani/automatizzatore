@@ -19,13 +19,14 @@ import {
   IconScroll,
   IconServer,
   IconSettings,
+  IconSparkle,
   IconSun,
   IconUser,
   IconUsers,
   IconX,
 } from "../components/ui/icons";
 import { Select } from "../components/ui/Select";
-import { pendingApprovalsQuery, useMe } from "../lib/queries";
+import { overviewQuery, pendingApprovalsQuery, useMe } from "../lib/queries";
 import { atLeast, roleIn } from "../lib/roles";
 import { readStorage, STORAGE_KEYS } from "../lib/storage";
 import { setTheme, useThemeChoice, type ThemeChoice } from "../lib/theme";
@@ -131,6 +132,7 @@ const WS_SECTIONS = [
   "automations",
   "runs",
   "approvals",
+  "builder",
   "costs",
   "connections",
   "secrets",
@@ -203,6 +205,16 @@ function Sidebar({ autoFocus }: { autoFocus?: boolean }) {
             <NavItem to="/w/$ws/approvals" ws={ws} icon={<IconCheckList size={16} />} badge={<PendingCount ws={ws} />}>
               Approvals
             </NavItem>
+            {atLeast(role, "builder") && (
+              <NavItem
+                to="/w/$ws/builder"
+                ws={ws}
+                icon={<IconSparkle size={16} />}
+                badge={atLeast(role, "admin") ? <ProposedCount ws={ws} /> : undefined}
+              >
+                Builder
+              </NavItem>
+            )}
             <NavItem to="/w/$ws/costs" ws={ws} icon={<IconEuro size={16} />}>
               Costs
             </NavItem>
@@ -269,6 +281,7 @@ type WsTo =
   | "/w/$ws/automations"
   | "/w/$ws/runs"
   | "/w/$ws/approvals"
+  | "/w/$ws/builder"
   | "/w/$ws/costs"
   | "/w/$ws/connections"
   | "/w/$ws/secrets"
@@ -330,6 +343,19 @@ function PendingCount({ ws }: { ws: string }) {
     <span className="tnum ml-auto rounded-full bg-[var(--st-orange-bg)] px-1.5 text-[11.5px] leading-5 font-semibold text-[var(--st-orange-fg)]">
       {n > 99 ? "99+" : n}
       <span className="sr-only"> pending</span>
+    </span>
+  );
+}
+
+/** Drafts proposed and waiting for activation, for those who can activate them (admins and owners). */
+function ProposedCount({ ws }: { ws: string }) {
+  const { data } = useQuery(overviewQuery(ws));
+  const n = data?.proposedDrafts ?? 0;
+  if (n === 0) return null;
+  return (
+    <span className="tnum ml-auto rounded-full bg-[var(--st-orange-bg)] px-1.5 text-[11.5px] leading-5 font-semibold text-[var(--st-orange-fg)]">
+      {n > 99 ? "99+" : n}
+      <span className="sr-only"> proposed</span>
     </span>
   );
 }

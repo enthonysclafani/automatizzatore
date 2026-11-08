@@ -426,3 +426,19 @@ func TestUsersAdministration(t *testing.T) {
 		t.Fatalf("system = %+v", sys)
 	}
 }
+
+// Behind a proxy, the client address is the one the proxy appended: the
+// entries before it come from the client and could rotate to dodge limits.
+func TestClientIPBehindProxy(t *testing.T) {
+	a := &API{}
+	a.Config.Server.TrustProxy = true
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("X-Forwarded-For", "6.6.6.6, 203.0.113.9")
+	if got := a.clientIP(r); got != "203.0.113.9" {
+		t.Fatalf("client IP = %s", got)
+	}
+	a.Config.Server.TrustProxy = false
+	if got := a.clientIP(r); got == "203.0.113.9" || got == "6.6.6.6" {
+		t.Fatalf("header trusted without trustProxy: %s", got)
+	}
+}

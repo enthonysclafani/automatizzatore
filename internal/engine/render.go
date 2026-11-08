@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/enthonysclafani/automatizzatore/internal/expr"
 	"github.com/enthonysclafani/automatizzatore/internal/secrets"
 )
@@ -13,7 +16,10 @@ import (
 func (ex *execution) render(v any, env expr.Env) (any, error) {
 	switch t := v.(type) {
 	case string:
-		if _, ok := secrets.Name(t); ok {
+		if name, ok := secrets.Name(t); ok {
+			if ex.dry {
+				return nil, fmt.Errorf("%w: %s", errDrySecret, name)
+			}
 			return ex.resolver.String(t)
 		}
 		return expr.String(t, env)
@@ -41,6 +47,10 @@ func (ex *execution) render(v any, env expr.Env) (any, error) {
 		return v, nil
 	}
 }
+
+// errDrySecret stops a dry-run step that would use a secret: dry runs are
+// for builders, who may not see secret values, so they never resolve one.
+var errDrySecret = errors.New("dry runs do not use secrets")
 
 // renderText renders a string and returns it as text.
 func (ex *execution) renderText(s string, env expr.Env) (string, error) {

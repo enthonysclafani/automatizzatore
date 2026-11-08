@@ -76,6 +76,23 @@ func SecretsProvider(cfg config.Config) secrets.Provider {
 	return secrets.FilesAndEnv{Dir: cfg.Secrets.Dir, EnvPrefix: cfg.Secrets.EnvPrefix}
 }
 
+// instanceSecrets decides which instance secrets (files and environment)
+// automations of a workspace may read: never the ones Pendolo itself uses;
+// in the default workspace all others; elsewhere only secrets.shared.
+func instanceSecrets(cfg config.Config, workspace string) func(string) bool {
+	reserved := cfg.ReservedSecrets()
+	shared := map[string]bool{}
+	for _, n := range cfg.Secrets.Shared {
+		shared[n] = true
+	}
+	return func(name string) bool {
+		if reserved[name] {
+			return false
+		}
+		return workspace == store.DefaultWorkspace || shared[name]
+	}
+}
+
 // OpenVault loads (or, the first time, generates) the master key.
 func OpenVault(cfg config.Config, log *slog.Logger) (*vault.Vault, error) {
 	key, source, err := vault.LoadKey(os.Getenv("PENDOLO_MASTER_KEY"), cfg.Secrets.MasterKeyFile, cfg.DataDir)
@@ -104,7 +121,8 @@ func NewEngine(cfg config.Config, st *store.Store, v *vault.Vault, log *slog.Log
 		Connectors: NewHub(cfg, st, v, log),
 		Notifier:   &notify.Notifier{Secrets: sec, HTTP: httpClient, Log: log, Config: cfg.Notify, PublicURL: cfg.Server.PublicURL},
 		SecretsFor: func(a engine.Automation, runID string) secrets.Provider {
-			return secrets.Workspace{Store: st, Vault: v, ID: a.Workspace(), Fallback: sec, Actor: "automation:" + a.Name, RunID: runID}
+			return secrets.Workspace{Store: st, Vault: v, ID: a.Workspace(), Fallback: sec,
+				FallbackAllowed: instanceSecrets(cfg, a.Workspace()), Actor: "automation:" + a.Name, RunID: runID}
 		},
 	}
 	if useRunner && cfg.Runner.URL != "" {

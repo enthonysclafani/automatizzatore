@@ -11,7 +11,7 @@ Pendolo reads `pendolo.yaml` (or the file in `$PENDOLO_CONFIG`, or `--config`). 
 | `server.publicURL` | `http://localhost:8080` | How people reach Pendolo: OAuth redirects (`<publicURL>/api/v1/oauth/callback`) and links in notifications use it. Also `PENDOLO_PUBLIC_URL`. |
 | `server.trustProxy` | `false` | Read the client address and `https` from `X-Forwarded-For` and `X-Forwarded-Proto`. Turn on only behind a reverse proxy. |
 | `auth.sessionTTL` | `336h` (14 days) | How long a browser stays signed in without activity. |
-| `auth.oidc` | off | Single sign-on; see below. |
+| `auth.oidc` | off | Single sign-on; see below. Pendolo accepts only emails the provider marks as verified (`email_verified`), unless `auth.oidc.trustUnverifiedEmail` is on. |
 | `secrets.masterKeyFile` | `/run/secrets/pendolo-master-key` | Base64 key that encrypts the secrets saved in the dashboard. |
 | `runner.url` | none | A `pendolo runner` that executes shell steps; without it, scripts run inside the server. |
 | `runner.token` | none | Token shared with the runner, usually `secret://runner-token`. |
@@ -20,6 +20,7 @@ Pendolo reads `pendolo.yaml` (or the file in `$PENDOLO_CONFIG`, or `--config`). 
 | `notify.email` | none | SMTP server for `email:` channels: `host`, `port`, `security` (`starttls`, `tls`, `none`), `username`, `password`, `from`. |
 | `secrets.dir` | `/run/secrets` | Folder with one file per secret. |
 | `secrets.envPrefix` | `PENDOLO_SECRET_` | Prefix of environment variables holding secrets. |
+| `secrets.shared` | none | Instance secrets (files and environment) that automations of every workspace may use. The `default` workspace may use all of them; other workspaces only these and their own. Secrets the configuration itself uses (model keys, the runner token, notification and sign-on secrets) and the master key are never available to automations. |
 | `heartbeat.url` | none | URL pinged while Pendolo is healthy; may be a `secret://` reference. |
 | `heartbeat.interval` | `5m` | How often the heartbeat is sent. |
 | `retention.runs` | `2160h` (90 days) | How long run history is kept. |

@@ -197,6 +197,16 @@ func (a *API) writeDraft(w http.ResponseWriter, r *http.Request, d *store.Draft,
 	writeJSON(w, status, v)
 }
 
+// writeFresh answers with the draft as stored now.
+func (a *API) writeFresh(w http.ResponseWriter, r *http.Request, id string) {
+	fresh, err := a.Store.GetDraft(r.Context(), id)
+	if err != nil {
+		a.internalError(w, err)
+		return
+	}
+	a.writeDraft(w, r, fresh, http.StatusOK)
+}
+
 func (a *API) listDrafts(w http.ResponseWriter, r *http.Request, _ *principal, ws string) {
 	status := r.URL.Query().Get("status")
 	switch status {
@@ -275,7 +285,7 @@ func (a *API) createDraft(w http.ResponseWriter, r *http.Request, p *principal, 
 		d.BaseName, d.BaseHash = in.Automation, hash
 		if in.Version != "" {
 			ver, err := a.Store.GetVersion(ctx, in.Automation, in.Version)
-			if errors.Is(err, store.ErrNotFound) {
+			if errors.Is(err, store.ErrNotFound) || (err == nil && ver.Workspace != ws) {
 				notFound(w, "version")
 				return
 			} else if err != nil {
@@ -419,7 +429,7 @@ func (a *API) converse(w http.ResponseWriter, r *http.Request, p *principal, d *
 		msg := "The builder could not answer: " + runErr.Error()
 		_ = a.Store.AddDraftMessage(ctx, d.ID, store.DraftMessage{Role: store.RoleEvent, Text: msg}, now)
 		a.Log.Warn("builder turn failed", "draft", d.ID, "err", runErr)
-		writeError(w, http.StatusBadGateway, "builder_failed", msg+". Try again, or rephrase the request.")
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg + ". Try again, or rephrase the request.", "code": "builder_failed", "draftId": d.ID})
 		return
 	}
 	if len(res.Files) > 0 {
@@ -442,6 +452,7 @@ func (a *API) converse(w http.ResponseWriter, r *http.Request, p *principal, d *
 		a.internalError(w, err)
 		return
 	}
+	a.draftBusy.Delete(d.ID) // the turn is over: the answer must not say busy
 	fresh, err := a.Store.GetDraft(ctx, d.ID)
 	if err != nil {
 		a.internalError(w, err)
@@ -627,8 +638,7 @@ func (a *API) proposeDraft(w http.ResponseWriter, r *http.Request, p *principal,
 	}
 	_ = a.Store.AddDraftMessage(r.Context(), d.ID, store.DraftMessage{Role: store.RoleEvent, Author: p.label(), Text: p.label() + " proposed this draft for activation.", Hash: d.Hash}, a.Now())
 	a.audit(r, p, "draft.propose", ws, d.ID, map[string]any{"automation": d.Automation, "hash": d.Hash})
-	fresh, _ := a.Store.GetDraft(r.Context(), d.ID)
-	a.writeDraft(w, r, fresh, http.StatusOK)
+	a.writeFresh(w, r, d.ID)
 }
 
 func (a *API) discardDraft(w http.ResponseWriter, r *http.Request, p *principal, ws string) {
@@ -656,19 +666,28 @@ func (a *API) discardDraft(w http.ResponseWriter, r *http.Request, p *principal,
 	}
 	_ = a.Store.AddDraftMessage(r.Context(), d.ID, store.DraftMessage{Role: store.RoleEvent, Author: p.label(), Text: text, Hash: d.Hash}, a.Now())
 	a.audit(r, p, "draft.discard", ws, d.ID, nil)
-	fresh, _ := a.Store.GetDraft(r.Context(), d.ID)
-	a.writeDraft(w, r, fresh, http.StatusOK)
+	a.writeFresh(w, r, d.ID)
 }
 
 func (a *API) activateDraft(w http.ResponseWriter, r *http.Request, p *principal, ws string) {
 	var in struct {
+		// Hash is the version of the files the admin reviewed.
+		Hash    string `json:"hash"`
 		Comment string `json:"comment"`
 	}
-	if r.ContentLength != 0 && !decode(w, r, &in) {
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Hash == "" {
+		badRequest(w, "hash is required: send the hash of the draft version you reviewed")
 		return
 	}
 	d, ok := a.draftIn(w, r, ws)
 	if !ok || !editable(w, d) {
+		return
+	}
+	if in.Hash != d.Hash {
+		writeError(w, http.StatusConflict, "changed", fmt.Sprintf("the draft changed since you reviewed it (now %s, you reviewed %s); review it again", d.Hash, in.Hash))
 		return
 	}
 	if _, busy := a.draftBusy.LoadOrStore(d.ID, struct{}{}); busy {
@@ -683,7 +702,6 @@ func (a *API) activateDraft(w http.ResponseWriter, r *http.Request, p *principal
 		return
 	}
 	if !requireClean(w, d, "activate it") {
-		_ = a.Store.SaveDraftContent(ctx, d, a.Now())
 		return
 	}
 
@@ -740,8 +758,8 @@ func (a *API) activateDraft(w http.ResponseWriter, r *http.Request, p *principal
 			a.Log.Error("reload after activation", "err", err)
 		}
 	}
-	fresh, _ := a.Store.GetDraft(ctx, d.ID)
-	a.writeDraft(w, r, fresh, http.StatusOK)
+	a.draftBusy.Delete(d.ID)
+	a.writeFresh(w, r, d.ID)
 }
 
 func (a *API) listVersions(w http.ResponseWriter, r *http.Request, _ *principal, ws string) {

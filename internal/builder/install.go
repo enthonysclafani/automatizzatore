@@ -11,9 +11,11 @@ import (
 // ErrFolderExists means a new automation would overwrite a folder.
 var ErrFolderExists = errors.New("folder already exists")
 
-// Install writes files as the automation folder root/folder. With replace,
-// an existing folder is swapped for the new one in a single rename, so the
-// scheduler never sees half a version; hidden files in it are kept.
+// Install writes files as the automation folder root/folder. The new
+// folder is written completely before it takes the old one's place, so the
+// scheduler never loads half a version. With replace, the old folder is
+// moved aside and the new one renamed in; if that fails the old one is put
+// back. Hidden files of the old folder are kept.
 func Install(root, folder string, files Files, replace bool) (dir string, err error) {
 	if !filePathRe.MatchString(folder) || strings.Contains(folder, "/") {
 		return "", fmt.Errorf("invalid folder name %q", folder)

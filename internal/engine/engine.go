@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,6 +78,10 @@ type Engine struct {
 	// SecretsFor returns the secrets a run may use; nil means Secrets for
 	// every run. It lets each workspace keep its own secrets.
 	SecretsFor func(a Automation, runID string) secrets.Provider
+	// DryRunHTTP makes the http requests of dry runs; nil means a client
+	// that reaches only public addresses, so a draft cannot probe the
+	// internal network before an admin activates it.
+	DryRunHTTP *http.Client
 	Log        *slog.Logger
 	Now        func() time.Time
 }
@@ -107,6 +112,18 @@ func (e *Engine) log() *slog.Logger {
 	}
 	return slog.Default()
 }
+
+func (ex *execution) httpClient() *http.Client {
+	if ex.dry {
+		if ex.e.DryRunHTTP != nil {
+			return ex.e.DryRunHTTP
+		}
+		return dryRunClient
+	}
+	return ex.e.httpClient()
+}
+
+var dryRunClient = connectors.PublicOnlyClient(5 * time.Minute)
 
 func (e *Engine) httpClient() *http.Client {
 	if e.HTTP != nil {
@@ -451,6 +468,16 @@ func (ex *execution) attempt(ctx context.Context, st *manifest.Step, env expr.En
 		o = ex.execAgent(ctx, st, env, path)
 	default:
 		o.err = fmt.Errorf("step type %q is %w", st.Type, errUnsupported)
+	}
+	if ex.dry && o.err != nil {
+		switch {
+		case errors.Is(o.err, errDrySecret):
+			return stepOutcome{input: o.input, output: map[string]any{"dryRun": true},
+				logs: dryNote + ": the step uses a secret (" + strings.TrimPrefix(o.err.Error(), errDrySecret.Error()+": ") + "), and dry runs never resolve secrets"}
+		case errors.Is(o.err, connectors.ErrPrivate):
+			return stepOutcome{input: o.input, output: map[string]any{"dryRun": true},
+				logs: dryNote + ": dry runs contact only public addresses"}
+		}
 	}
 	if o.err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) && timeout > 0 {
 		o.err = fmt.Errorf("timed out after %s: %w", timeout, o.err)

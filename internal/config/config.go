@@ -6,10 +6,13 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -69,6 +72,9 @@ type OIDC struct {
 	// AllowedDomains; they start without workspaces.
 	AutoCreate     bool     `yaml:"autoCreate"`
 	AllowedDomains []string `yaml:"allowedDomains"`
+	// TrustUnverifiedEmail accepts emails the provider does not mark as
+	// verified (email_verified). Only for providers that verify every email.
+	TrustUnverifiedEmail bool `yaml:"trustUnverifiedEmail"`
 }
 
 // Enabled reports whether OIDC is configured.
@@ -127,7 +133,28 @@ type Secrets struct {
 	Dir string `yaml:"dir"`
 	// EnvPrefix: secret://server-ssh-key is read from PENDOLO_SECRET_SERVER_SSH_KEY.
 	EnvPrefix string `yaml:"envPrefix"`
+	// Shared lists the instance secrets (files and environment) that
+	// automations of every workspace may use. The default workspace may use
+	// all of them; other workspaces only these, plus their own.
+	Shared []string `yaml:"shared"`
 }
+
+// ReservedSecrets returns the instance secrets automations may never read:
+// those the configuration itself uses (model keys, the runner token,
+// notification tokens, single sign-on) and the master key file.
+func (c Config) ReservedSecrets() map[string]bool {
+	out := map[string]bool{"pendolo-master-key": true}
+	if c.Secrets.MasterKeyFile != "" {
+		out[filepath.Base(c.Secrets.MasterKeyFile)] = true
+	}
+	raw, _ := json.Marshal(c)
+	for _, m := range secretRefRe.FindAllStringSubmatch(string(raw), -1) {
+		out[m[1]] = true
+	}
+	return out
+}
+
+var secretRefRe = regexp.MustCompile(`secret://([A-Za-z0-9][A-Za-z0-9_.-]*)`)
 
 // Retention controls how long run history is kept.
 type Retention struct {

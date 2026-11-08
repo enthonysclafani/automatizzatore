@@ -297,6 +297,12 @@ func (a *API) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		fail("Google refused the sign-in: " + e)
 		return
 	}
+	// Only the person who started the sign-in, in their own browser, may
+	// finish it: a consent link sent to someone else does not connect their account.
+	if p, err := a.authenticate(r); err != nil || p == nil || p.User.Email != st.user {
+		fail("Finish the sign-in in the browser where you started it, signed in as " + st.user + ".")
+		return
+	}
 	c, err := a.Store.GetConnection(r.Context(), st.workspace, st.connection)
 	if err != nil {
 		fail("The connection no longer exists.")

@@ -68,4 +68,5 @@ export const triggerTypeLabel: Record<string, string> = {
   webhook: "Webhook",
   manual: "Manual",
   email: "Email",
+  dry_run: "Dry run",
 };

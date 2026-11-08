@@ -280,9 +280,13 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 // clientIP is the caller's address, from X-Forwarded-For when trusted.
 func (a *API) clientIP(r *http.Request) string {
 	if a.Config.Server.TrustProxy {
+		// The proxy appends the address it saw: the last entry. Earlier
+		// entries come from the client and can be forged.
 		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-			first, _, _ := strings.Cut(fwd, ",")
-			return strings.TrimSpace(first)
+			parts := strings.Split(fwd, ",")
+			if last := strings.TrimSpace(parts[len(parts)-1]); last != "" {
+				return last
+			}
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

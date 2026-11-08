@@ -2,12 +2,16 @@ package e2e
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/enthonysclafani/automatizzatore/internal/connectors"
 	"github.com/enthonysclafani/automatizzatore/internal/engine"
 	"github.com/enthonysclafani/automatizzatore/internal/llm"
+	"github.com/enthonysclafani/automatizzatore/internal/secrets"
 	"github.com/enthonysclafani/automatizzatore/internal/store"
 	"github.com/enthonysclafani/automatizzatore/internal/testfakes"
 )
@@ -86,5 +90,45 @@ steps:
 	}
 	if s := step(steps, "cleanup"); !strings.Contains(string(s.Input), "wouldWaitForApproval") {
 		t.Fatalf("cleanup = %s", s.Input)
+	}
+}
+
+// A dry run never resolves a secret and never contacts a private address:
+// a builder cannot use one to read secrets or probe the internal network.
+func TestDryRunKeepsSecretsAndNetwork(t *testing.T) {
+	var got atomic.Value
+	got.Store("")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			got.Store(r.Header.Get("X-K"))
+		}
+	}))
+	defer srv.Close()
+	w := newWorld(t)
+	w.eng.Secrets = secrets.Static{"k": "TOPSECRET"}
+	a := inline(t, `apiVersion: pendolo/v1
+kind: Automation
+metadata: { name: dry-secret }
+triggers: [ { manual: {} } ]
+steps:
+  - { id: leak, type: http, request: { url: "`+srv.URL+`", headers: { X-K: "secret://k" } } }
+  - { id: probe, type: http, request: { url: "`+srv.URL+`/admin" } }
+`)
+	out, run, steps := w.run(a, engine.TriggerDryRun, nil)
+	if out.Status != store.RunSucceeded {
+		t.Fatalf("run %s: %s\n%s", run.Status, run.Error, dump(steps))
+	}
+	if v := got.Load().(string); v != "" {
+		t.Fatalf("the server received %q", v)
+	}
+	if s := step(steps, "leak"); !strings.Contains(s.Logs, "never resolve secrets") {
+		t.Fatalf("leak = %+v", s)
+	}
+	if s := step(steps, "probe"); !strings.Contains(s.Logs, "only public addresses") {
+		t.Fatalf("probe = %+v", s)
+	}
+	// A real run does both.
+	if out, run, steps := w.run(a, "manual", nil); out.Status != store.RunSucceeded || got.Load().(string) != "TOPSECRET" {
+		t.Fatalf("real run %s: %s\n%s", run.Status, run.Error, dump(steps))
 	}
 }

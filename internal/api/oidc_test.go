@@ -22,6 +22,8 @@ type fakeIssuer struct {
 	key   *rsa.PrivateKey
 	nonce string
 	email string
+	// unverified leaves email_verified out of the ID token.
+	unverified bool
 }
 
 func newFakeIssuer(t *testing.T) *fakeIssuer {
@@ -46,10 +48,14 @@ func newFakeIssuer(t *testing.T) *fakeIssuer {
 			return
 		}
 		signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: key}, (&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", "k1"))
-		claims, _ := json.Marshal(map[string]any{
+		c := map[string]any{
 			"iss": f.srv.URL, "sub": "user-1", "aud": "pendolo", "exp": time.Now().Add(time.Hour).Unix(), "iat": time.Now().Unix(),
 			"nonce": f.nonce, "email": f.email, "email_verified": true, "name": "New Person",
-		})
+		}
+		if f.unverified {
+			delete(c, "email_verified")
+		}
+		claims, _ := json.Marshal(c)
 		jws, _ := signer.Sign(claims)
 		idToken, _ := jws.CompactSerialize()
 		w.Header().Set("Content-Type", "application/json")
@@ -101,6 +107,14 @@ func TestOIDCLogin(t *testing.T) {
 	if me.Email != "new.person@example.com" || me.IsOwner || len(me.Workspaces) != 0 {
 		t.Fatalf("auto-created user: %+v", me)
 	}
+
+	// An email the provider does not mark as verified opens no account,
+	// not even an existing one.
+	issuer.unverified, issuer.email = true, "owner@example.com"
+	if _, where = signIn(); !strings.Contains(where, "verified") {
+		t.Fatalf("unverified email redirected to %q", where)
+	}
+	issuer.unverified = false
 
 	// A domain that is not allowed gets no account.
 	issuer.email = "stranger@other.org"

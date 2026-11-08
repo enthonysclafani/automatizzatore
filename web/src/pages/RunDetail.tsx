@@ -14,7 +14,7 @@ import { dotColor, Tag } from "../components/ui/Badge";
 import { Card, CardBody, CardHeader } from "../components/ui/Card";
 import { CopyButton } from "../components/ui/Copy";
 import { cx } from "../components/ui/cx";
-import { IconAlert, IconChevronRight, IconHourglass, IconSparkle } from "../components/ui/icons";
+import { IconAlert, IconChevronRight, IconHourglass, IconInfo, IconSparkle } from "../components/ui/icons";
 import { JsonDetails } from "../components/ui/JsonDetails";
 import { DefList, Page, PageHeader } from "../components/ui/Page";
 import { EmptyState, ErrorState, Skeleton, SkeletonRows } from "../components/ui/States";
@@ -118,6 +118,7 @@ function RunView({ ws, detail, refreshing }: { ws: string; detail: RunDetail; re
   const active = isActive(run.status);
   const duration = run.startedAt ? durationBetween(run.startedAt, run.finishedAt, now) : undefined;
   const steps = [...detail.steps].sort((a, b) => a.seq - b.seq);
+  const dry = run.triggerType === "dry_run";
 
   return (
     <>
@@ -125,14 +126,20 @@ function RunView({ ws, detail, refreshing }: { ws: string; detail: RunDetail; re
         breadcrumb={<Crumb ws={ws} />}
         title={
           <span className="flex flex-wrap items-center gap-2">
-            <Link
-              to="/w/$ws/automations/$name"
-              params={{ ws, name: run.automation }}
-              className="hover:underline"
-            >
-              {run.automation}
-            </Link>
+            {dry ? (
+              // A dry run may test a draft that is not an automation yet.
+              <span>{run.automation || "Untitled draft"}</span>
+            ) : (
+              <Link
+                to="/w/$ws/automations/$name"
+                params={{ ws, name: run.automation }}
+                className="hover:underline"
+              >
+                {run.automation}
+              </Link>
+            )}
             <StatusBadge status={run.status} />
+            {dry && <Tag>Dry run</Tag>}
           </span>
         }
         description={
@@ -148,6 +155,16 @@ function RunView({ ws, detail, refreshing }: { ws: string; detail: RunDetail; re
       />
 
       <div className="space-y-4">
+        {dry && (
+          <div role="note" className="flex gap-3 rounded-lg border border-line bg-surface-2 px-4 py-3 text-[13px]">
+            <IconInfo size={16} className="mt-0.5 shrink-0 text-muted" />
+            <p className="min-w-0 text-fg-2">
+              <span className="font-medium text-fg">A dry run of a builder draft.</span> Reads ran for real; writes,
+              messages and scripts were only recorded, and approvals were skipped.
+            </p>
+          </div>
+        )}
+
         {run.status === "waiting" && <WaitingBanner ws={ws} approvals={approvals} role={role} />}
 
         {run.error && (

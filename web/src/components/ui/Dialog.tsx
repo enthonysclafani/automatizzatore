@@ -24,7 +24,7 @@ export function Dialog({
   footer?: ReactNode;
   /** When set, the body is a form and Enter submits it. */
   onSubmit?: (e: FormEvent<HTMLFormElement>) => void;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -59,7 +59,7 @@ export function Dialog({
     if (!open && d.open) d.close();
   }, [open]);
 
-  const width = size === "sm" ? "max-w-sm" : size === "lg" ? "max-w-2xl" : "max-w-lg";
+  const width = size === "sm" ? "max-w-sm" : size === "lg" ? "max-w-2xl" : size === "xl" ? "max-w-5xl" : "max-w-lg";
   const content = (
     <>
       <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">

@@ -131,8 +131,10 @@ func (a *API) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		loginRedirect(w, r, "The provider did not share an email address.")
 		return
 	}
-	if claims.EmailVerified != nil && !*claims.EmailVerified {
-		loginRedirect(w, r, "Verify your email address with the provider first.")
+	// An unverified email could belong to anyone: it must not open the
+	// account that has it, unless the configuration trusts the provider.
+	if (claims.EmailVerified == nil || !*claims.EmailVerified) && !a.Config.Auth.OIDC.TrustUnverifiedEmail {
+		loginRedirect(w, r, "The provider did not confirm your email address is verified. Verify it there, or ask the owner to set auth.oidc.trustUnverifiedEmail.")
 		return
 	}
 	u, problem := a.oidcUser(r, strings.ToLower(claims.Email), claims.Name)

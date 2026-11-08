@@ -212,8 +212,19 @@ func (h *Hub) webTest(ctx context.Context, c *Conn) (string, error) {
 
 var titleRe = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 
-// errPrivate is returned for addresses web.fetch refuses.
-var errPrivate = errors.New("refused: private, loopback and link-local addresses are not fetched")
+// ErrPrivate is returned for addresses a public-only client refuses.
+var ErrPrivate = errors.New("refused: private, loopback, link-local and shared addresses are not contacted")
+
+// nonPublic lists ranges that are not reachable public internet, beyond
+// what net.IP's own predicates cover.
+var nonPublic = func() []*net.IPNet {
+	var out []*net.IPNet
+	for _, c := range []string{"100.64.0.0/10", "192.0.0.0/24", "198.18.0.0/15", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16"} {
+		_, n, _ := net.ParseCIDR(c)
+		out = append(out, n)
+	}
+	return out
+}()
 
 // publicOnly refuses connections to private networks, so a page or a
 // prompt cannot make Pendolo read internal services.
@@ -224,20 +235,25 @@ func publicOnly(_, address string, _ syscall.RawConn) error {
 	}
 	ip := net.ParseIP(host)
 	if ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsUnspecified() || ip.IsMulticast() {
-		return errPrivate
+		ip.IsUnspecified() || ip.IsMulticast() || ip.IsInterfaceLocalMulticast() {
+		return ErrPrivate
+	}
+	for _, n := range nonPublic {
+		if n.Contains(ip) {
+			return ErrPrivate
+		}
 	}
 	return nil
 }
 
-func (h *Hub) fetchClient() *http.Client {
-	if h.AllowPrivateFetch {
-		return h.client()
-	}
+// PublicOnlyClient returns an HTTP client that connects only to public
+// addresses. It connects directly, without a proxy, so the check sees the
+// real destination.
+func PublicOnlyClient(timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: publicOnly}
 	return &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: dialer.DialContext, TLSHandshakeTimeout: 10 * time.Second},
+		Timeout:   timeout,
+		Transport: &http.Transport{Proxy: nil, DialContext: dialer.DialContext, TLSHandshakeTimeout: 10 * time.Second},
 		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return errors.New("too many redirects")
@@ -245,6 +261,13 @@ func (h *Hub) fetchClient() *http.Client {
 			return nil
 		},
 	}
+}
+
+func (h *Hub) fetchClient() *http.Client {
+	if h.AllowPrivateFetch {
+		return h.client()
+	}
+	return PublicOnlyClient(30 * time.Second)
 }
 
 func (h *Hub) webFetch(ctx context.Context, raw string) (any, error) {
@@ -259,8 +282,8 @@ func (h *Hub) webFetch(ctx context.Context, raw string) (any, error) {
 	req.Header.Set("User-Agent", "pendolo (+https://github.com/enthonysclafani/automatizzatore)")
 	resp, err := h.fetchClient().Do(req)
 	if err != nil {
-		if errors.Is(err, errPrivate) {
-			return nil, errPrivate
+		if errors.Is(err, ErrPrivate) {
+			return nil, ErrPrivate
 		}
 		return nil, fmt.Errorf("fetch %s: %w", u.Host, err)
 	}

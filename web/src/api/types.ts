@@ -443,7 +443,7 @@ export interface Draft {
   comment?: string;
 }
 
-/** GET /drafts/{id} and every draft action. */
+/** GET /drafts/{id} and every draft action. Activation takes {hash, comment?}: hash is the version reviewed. */
 export interface DraftDetail extends Draft {
   files: Record<string, string>;
   messages: DraftMessage[];

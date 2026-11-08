@@ -19,7 +19,9 @@ import { ApprovalsPage } from "./pages/Approvals";
 import { AuditPage } from "./pages/Audit";
 import { AutomationDetailPage } from "./pages/AutomationDetail";
 import { AutomationsPage } from "./pages/Automations";
+import { BuilderPage } from "./pages/Builder";
 import { ConnectionsPage } from "./pages/Connections";
+import { DraftPage } from "./pages/Draft";
 import { HomeRedirect } from "./pages/HomeRedirect";
 import { LoginPage } from "./pages/Login";
 import { MembersPage } from "./pages/Members";
@@ -182,6 +184,18 @@ const connectionsRoute = createRoute({
   component: ConnectionsPage,
 });
 
+const builderRoute = createRoute({
+  getParentRoute: () => wsRoute,
+  path: "builder",
+  component: BuilderPage,
+});
+
+const draftRoute = createRoute({
+  getParentRoute: () => wsRoute,
+  path: "builder/$draftId",
+  component: DraftPage,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => wsRoute,
   path: "settings",
@@ -223,6 +237,8 @@ const routeTree = rootRoute.addChildren([
       auditRoute,
       approvalsRoute,
       connectionsRoute,
+      builderRoute,
+      draftRoute,
       settingsRoute,
     ]),
     usersRoute,

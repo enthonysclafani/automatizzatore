@@ -58,8 +58,23 @@ func TestConnectionsAndOAuth(t *testing.T) {
 		t.Fatalf("auth URL = %s", start.URL)
 	}
 
-	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := noFollow.Get(e.srv.URL + "/api/v1/oauth/callback?state=" + state + "&code=the-code")
+	// Another browser cannot finish the sign-in (a consent link sent to someone else).
+	stranger := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	var start2 struct{ URL string }
+	owner.do("POST", "/api/v1/workspaces/ws-a/connections/google/oauth/start", nil, &start2)
+	auth2, _ := url.Parse(start2.URL)
+	resp, err := stranger.Get(e.srv.URL + "/api/v1/oauth/callback?state=" + auth2.Query().Get("state") + "&code=the-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if loc := resp.Header.Get("Location"); !strings.Contains(loc, "error=Finish") || gotVerifier != "" {
+		t.Fatalf("stranger callback = %q", loc)
+	}
+
+	// The browser that started it can.
+	noFollow := &http.Client{Jar: owner.http.Jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err = noFollow.Get(e.srv.URL + "/api/v1/oauth/callback?state=" + state + "&code=the-code")
 	if err != nil {
 		t.Fatal(err)
 	}
