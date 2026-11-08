@@ -31,6 +31,8 @@ type Notifier struct {
 	Config  config.Notify
 	HTTP    *http.Client
 	Log     *slog.Logger
+	// PublicURL is used for links to the dashboard.
+	PublicURL string
 	// API base URLs, replaced in tests.
 	SlackAPI    string
 	TelegramAPI string
@@ -76,6 +78,26 @@ func (n *Notifier) Notify(ctx context.Context, a engine.Automation, run *store.R
 	for _, ch := range cfg.Channels {
 		if err := n.Send(ctx, ch, p); err != nil {
 			n.log().Error("notification failed", "automation", a.Name, "run", run.ID, "channel", channelKind(ch), "err", err)
+		}
+	}
+}
+
+// ApprovalRequested implements engine.ApprovalNotifier: it tells the
+// automation's channels that a run waits for a decision.
+func (n *Notifier) ApprovalRequested(ctx context.Context, a engine.Automation, ap *store.Approval) {
+	cfg := a.Manifest.Notifications
+	if cfg == nil || cfg.On == "never" {
+		return
+	}
+	link := strings.TrimRight(n.PublicURL, "/") + "/w/" + ap.Workspace + "/approvals"
+	text := fmt.Sprintf("%s waits for approval: %s", a.Name, ap.Message)
+	p := Payload{
+		Text: text + "\nDecide at " + link, Content: text + "\nDecide at " + link, Automation: a.Name, RunID: ap.RunID,
+		Status: store.RunWaiting, Trigger: "approval", FinishedAt: ap.RequestedAt,
+	}
+	for _, ch := range cfg.Channels {
+		if err := n.Send(ctx, ch, p); err != nil {
+			n.log().Error("approval notification failed", "automation", a.Name, "channel", channelKind(ch), "err", err)
 		}
 	}
 }

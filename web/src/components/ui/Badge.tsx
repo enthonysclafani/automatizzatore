@@ -1,13 +1,14 @@
 import type { ReactNode } from "react";
 import { cx } from "./cx";
 
-export type Tone = "green" | "red" | "blue" | "amber" | "gray";
+export type Tone = "green" | "red" | "blue" | "amber" | "orange" | "gray";
 
 const tones: Record<Tone, string> = {
   green: "bg-[var(--st-green-bg)] text-[var(--st-green-fg)]",
   red: "bg-[var(--st-red-bg)] text-[var(--st-red-fg)]",
   blue: "bg-[var(--st-blue-bg)] text-[var(--st-blue-fg)]",
   amber: "bg-[var(--st-amber-bg)] text-[var(--st-amber-fg)]",
+  orange: "bg-[var(--st-orange-bg)] text-[var(--st-orange-fg)]",
   gray: "bg-[var(--st-gray-bg)] text-[var(--st-gray-fg)]",
 };
 
@@ -16,6 +17,7 @@ export const dotColor: Record<Tone, string> = {
   red: "bg-[var(--st-red-dot)]",
   blue: "bg-[var(--st-blue-dot)]",
   amber: "bg-[var(--st-amber-dot)]",
+  orange: "bg-[var(--st-orange-dot)]",
   gray: "bg-[var(--st-gray-dot)]",
 };
 
@@ -24,6 +26,7 @@ export const textTone: Record<Tone, string> = {
   red: "text-[var(--st-red-fg)]",
   blue: "text-[var(--st-blue-fg)]",
   amber: "text-[var(--st-amber-fg)]",
+  orange: "text-[var(--st-orange-fg)]",
   gray: "text-[var(--st-gray-fg)]",
 };
 

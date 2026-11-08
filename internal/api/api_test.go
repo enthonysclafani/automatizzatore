@@ -17,6 +17,7 @@ import (
 
 	"github.com/enthonysclafani/automatizzatore/internal/auth"
 	"github.com/enthonysclafani/automatizzatore/internal/config"
+	"github.com/enthonysclafani/automatizzatore/internal/connectors"
 	"github.com/enthonysclafani/automatizzatore/internal/registry"
 	"github.com/enthonysclafani/automatizzatore/internal/store"
 	"github.com/enthonysclafani/automatizzatore/internal/vault"
@@ -69,6 +70,7 @@ func newEnv(t *testing.T) *env {
 	e := &env{t: t, store: st, now: time.Now()}
 	e.api = New(&API{
 		Store: st, Vault: v, Config: cfg, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Hub:      &connectors.Hub{Store: st, Vault: v, PublicURL: "http://localhost:8080", AllowPrivateFetch: true},
 		Snapshot: func() registry.Snapshot { return snap },
 		Health:   func(context.Context) Health { return Health{OK: true, Version: "test", Runner: "local"} },
 		Now:      func() time.Time { return e.now },
@@ -273,6 +275,7 @@ func TestViewerSeesOnlyOwnWorkspace(t *testing.T) {
 		"/api/v1/workspaces/ws-b/overview", "/api/v1/workspaces/ws-b/automations", "/api/v1/workspaces/ws-b/automations/beta",
 		"/api/v1/workspaces/ws-b/runs", "/api/v1/workspaces/ws-b/runs/" + runB, "/api/v1/workspaces/ws-b/costs",
 		"/api/v1/workspaces/ws-b/secrets", "/api/v1/workspaces/nope/overview",
+		"/api/v1/workspaces/ws-b/connections", "/api/v1/workspaces/ws-b/approvals", "/api/v1/workspaces/ws-b/settings",
 	} {
 		viewer.expect("GET", path, nil, 404)
 	}
@@ -287,6 +290,11 @@ func TestViewerSeesOnlyOwnWorkspace(t *testing.T) {
 	viewer.expect("PUT", "/api/v1/workspaces/ws-a/secrets/x", map[string]string{"value": "v"}, 403)
 	viewer.expect("GET", "/api/v1/workspaces/ws-a/members", nil, 403)
 	viewer.expect("GET", "/api/v1/workspaces/ws-a/audit", nil, 403)
+	viewer.expect("GET", "/api/v1/workspaces/ws-a/connections", nil, 200)
+	viewer.expect("GET", "/api/v1/workspaces/ws-a/approvals", nil, 200)
+	viewer.expect("PUT", "/api/v1/workspaces/ws-a/connections/slack", map[string]any{"kind": "slack", "config": map[string]any{}}, 403)
+	viewer.expect("POST", "/api/v1/workspaces/ws-a/connections/slack/test", nil, 403)
+	viewer.expect("PATCH", "/api/v1/workspaces/ws-a/settings", map[string]string{"maxAutonomy": "auto"}, 403)
 	// And no owner endpoints.
 	for _, path := range []string{"/api/v1/users", "/api/v1/system", "/api/v1/audit"} {
 		viewer.expect("GET", path, nil, 403)

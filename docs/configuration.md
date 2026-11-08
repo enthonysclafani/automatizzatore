@@ -8,6 +8,7 @@ Pendolo reads `pendolo.yaml` (or the file in `$PENDOLO_CONFIG`, or `--config`). 
 | `automationsDir` | `automations` | One sub-folder per automation, each with an `automation.yaml`. |
 | `workers` | `4` | Runs executed at the same time. Runs of the same automation never overlap. |
 | `server.listen` | `:8080` | Address of the dashboard, the API (`/api/v1`), `/healthz` and webhook triggers (`/hooks/<name>`). |
+| `server.publicURL` | `http://localhost:8080` | How people reach Pendolo: OAuth redirects (`<publicURL>/api/v1/oauth/callback`) and links in notifications use it. Also `PENDOLO_PUBLIC_URL`. |
 | `server.trustProxy` | `false` | Read the client address and `https` from `X-Forwarded-For` and `X-Forwarded-Proto`. Turn on only behind a reverse proxy. |
 | `auth.sessionTTL` | `336h` (14 days) | How long a browser stays signed in without activity. |
 | `auth.oidc` | off | Single sign-on; see below. |

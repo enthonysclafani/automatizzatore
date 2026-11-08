@@ -71,8 +71,9 @@ export interface Health {
   runner: string;
 }
 
-export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
-export type StepStatus = "running" | "succeeded" | "failed" | "skipped";
+/** "waiting": paused until a person approves or rejects (see Approval). */
+export type RunStatus = "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled";
+export type StepStatus = "running" | "waiting" | "succeeded" | "failed" | "skipped";
 
 export interface Run {
   id: string;
@@ -134,6 +135,8 @@ export interface RunDetail {
   run: Run;
   steps: Step[];
   llmCalls: LLMCall[];
+  /** Approvals requested by this run, oldest first. */
+  approvals: Approval[];
 }
 
 export interface RunList {
@@ -179,6 +182,8 @@ export interface Overview {
   runs24h: { succeeded: number; failed: number; cancelled: number; withAnomalies: number };
   running: number;
   queued: number;
+  /** Pending approvals in this workspace. */
+  waitingApprovals: number;
   costMonthEur: number;
   /** Last 14 days, oldest first, every day present (zeros included). Dates are YYYY-MM-DD. */
   daily: { date: string; succeeded: number; failed: number; costEur: number }[];
@@ -263,4 +268,112 @@ export interface SystemInfo {
   workers: number;
   invalid: { name: string; path: string; problems: Problem[] }[];
   oidc: { enabled: boolean; issuer?: string };
+}
+
+// ---- Phase 3: connections, approvals, workspace settings ----
+
+export type Autonomy = "observe" | "draft" | "ask" | "auto";
+export type Risk = "read" | "write" | "send" | "destructive";
+export type ConnectionKind = "google" | "slack" | "websearch" | "mcp";
+
+export interface ActionInfo {
+  /** e.g. "gmail.search"; for MCP connections "<connection name>.<tool>". */
+  name: string;
+  description: string;
+  risk: Risk;
+  /** With autonomy "draft", this action runs instead (e.g. gmail.send -> gmail.create_draft). */
+  draftAlternative?: string;
+}
+
+export interface ConnectorField {
+  name: string;
+  label: string;
+  type: "string" | "string[]" | "map";
+  /** Secret fields are write-only: sent in ConnectionInput.secrets, never returned. */
+  secret: boolean;
+  required: boolean;
+  help?: string;
+  options?: string[];
+  default?: unknown;
+}
+
+export interface ConnectorKindInfo {
+  kind: ConnectionKind;
+  label: string;
+  description: string;
+  fields: ConnectorField[];
+  /** True when the connection needs a browser sign-in after saving (Google). */
+  oauth: boolean;
+  /** Steps shown in the setup wizard, in order. Plain text, may contain URLs. */
+  setupSteps: string[];
+  /** Actions every connection of this kind provides (empty for MCP: discovered per server). */
+  actions: ActionInfo[];
+}
+
+export interface ConnectorCatalog {
+  kinds: ConnectorKindInfo[];
+  /** The redirect URI to register with OAuth providers, e.g. "https://pendolo.example.com/api/v1/oauth/callback". */
+  oauthRedirectURL: string;
+}
+
+export interface Connection {
+  /** Used in automations as `connection: <name>` (and as the action prefix for MCP). */
+  name: string;
+  kind: ConnectionKind;
+  /** Non-secret settings, by field name. */
+  config: Record<string, unknown>;
+  /** Names of secret fields that hold a value; values are never returned. For MCP, the header names. */
+  secretsSet: string[];
+  /** needs_auth: saved but the OAuth sign-in has not been completed. */
+  status: "ready" | "needs_auth" | "error";
+  error?: string;
+  /** The signed-in account, when the provider tells us (Google email, Slack team). */
+  account?: string;
+  updatedAt: string;
+  updatedBy: string;
+  /** What the connection can do. For MCP, discovered from the server (empty when unreachable). */
+  actions: ActionInfo[];
+}
+
+export interface ConnectionInput {
+  kind: ConnectionKind;
+  config: Record<string, unknown>;
+  /**
+   * Only the secrets to set or replace; omitted ones keep their value, and an
+   * empty string removes one. For MCP, keys are header names
+   * (e.g. {"Authorization": "Bearer ..."}).
+   */
+  secrets?: Record<string, string>;
+}
+
+export interface ConnectionTest {
+  ok: boolean;
+  detail: string;
+}
+
+export interface Approval {
+  id: string;
+  runId: string;
+  workspace: string;
+  automation: string;
+  stepPath: string;
+  message: string;
+  /** What runs if approved: { action?, connection?, input?, ... } with secrets masked. */
+  detail: unknown;
+  /** Roles allowed to decide (owners always can). */
+  approvers: Role[];
+  status: "pending" | "approved" | "rejected" | "expired";
+  onTimeout: "reject" | "approve";
+  requestedAt: string;
+  expiresAt: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  comment?: string;
+}
+
+export interface WorkspaceSettings {
+  id: string;
+  name: string;
+  /** The most autonomy any automation in this workspace gets, whatever its manifest says. */
+  maxAutonomy: Autonomy;
 }

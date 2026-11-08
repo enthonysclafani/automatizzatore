@@ -44,8 +44,13 @@
     },
     "actionRef": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
-      "description": "<connector>.<action>, e.g. gmail.apply_labels."
+      "pattern": "^[a-z][a-z0-9_-]*\\.[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+      "description": "<connector>.<action>, e.g. gmail.apply_labels, or <MCP connection>.<tool name>."
+    },
+    "connectionName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+      "description": "A connection of the workspace, as named on the Connections page."
     },
     "autonomy": {
       "enum": ["observe", "draft", "ask", "auto"],
@@ -128,7 +133,7 @@
           "additionalProperties": false,
           "required": ["connection"],
           "properties": {
-            "connection": { "$ref": "#/$defs/name" },
+            "connection": { "$ref": "#/$defs/connectionName" },
             "query": { "type": "string" },
             "interval": { "$ref": "#/$defs/duration" }
           }
@@ -180,7 +185,7 @@
       "properties": {
         "id": true, "type": true, "name": true, "if": true, "timeout": true, "retry": true, "continueOnError": true,
         "action": { "$ref": "#/$defs/actionRef" },
-        "connection": { "$ref": "#/$defs/name" },
+        "connection": { "$ref": "#/$defs/connectionName" },
         "with": { "type": "object" }
       },
       "additionalProperties": false

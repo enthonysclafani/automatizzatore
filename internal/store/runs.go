@@ -128,8 +128,8 @@ func (s *Store) RenewLease(ctx context.Context, id, worker string, until time.Ti
 
 // Finish records the outcome of a run.
 func (s *Store) Finish(ctx context.Context, id, status, errMsg string, anomalies int, cost float64, now time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE runs SET status = ?, error = ?, anomalies = ?, cost_eur = ?, finished_at = ?, lease_until = NULL
-		WHERE id = ?`, status, errMsg, anomalies, cost, ts(now), id)
+	_, err := s.db.ExecContext(ctx, `UPDATE runs SET status = ?, error = ?, anomalies = ?, cost_eur = ?, finished_at = ?, lease_until = NULL,
+		checkpoint = '' WHERE id = ?`, status, errMsg, anomalies, cost, ts(now), id)
 	return err
 }
 

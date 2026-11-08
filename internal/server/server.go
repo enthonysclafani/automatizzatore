@@ -21,6 +21,7 @@ import (
 	"github.com/enthonysclafani/automatizzatore/internal/api"
 	"github.com/enthonysclafani/automatizzatore/internal/auth"
 	"github.com/enthonysclafani/automatizzatore/internal/config"
+	"github.com/enthonysclafani/automatizzatore/internal/connectors"
 	"github.com/enthonysclafani/automatizzatore/internal/engine"
 	"github.com/enthonysclafani/automatizzatore/internal/llm"
 	"github.com/enthonysclafani/automatizzatore/internal/notify"
@@ -38,6 +39,7 @@ var (
 	ReloadInterval = 30 * time.Second
 	PollInterval   = time.Second
 	Lease          = time.Minute
+	EmailPollTick  = 30 * time.Second
 	ShutdownGrace  = 30 * time.Second
 	StaleTick      = 30 * time.Second
 )
@@ -54,6 +56,7 @@ type Server struct {
 	wake    chan struct{}
 
 	runner *runner.Remote
+	hub    *connectors.Hub
 	api    *api.API
 
 	mu      sync.RWMutex
@@ -83,6 +86,11 @@ func OpenVault(cfg config.Config, log *slog.Logger) (*vault.Vault, error) {
 	return vault.New(key)
 }
 
+// NewHub returns the connector hub for a store and vault.
+func NewHub(cfg config.Config, st *store.Store, v *vault.Vault, log *slog.Logger) *connectors.Hub {
+	return &connectors.Hub{Store: st, Vault: v, Log: log, PublicURL: cfg.Server.PublicURL}
+}
+
 // NewEngine builds an engine over st from the configuration. With
 // useRunner, shell steps go to the configured runner, if any.
 func NewEngine(cfg config.Config, st *store.Store, v *vault.Vault, log *slog.Logger, useRunner bool) (*engine.Engine, error) {
@@ -90,7 +98,8 @@ func NewEngine(cfg config.Config, st *store.Store, v *vault.Vault, log *slog.Log
 	httpClient := &http.Client{Timeout: 5 * time.Minute}
 	e := &engine.Engine{
 		Store: st, LLM: llm.New(cfg, sec), Secrets: sec, HTTP: httpClient, Log: log,
-		Notifier: &notify.Notifier{Secrets: sec, HTTP: httpClient, Log: log, Config: cfg.Notify},
+		Connectors: NewHub(cfg, st, v, log),
+		Notifier:   &notify.Notifier{Secrets: sec, HTTP: httpClient, Log: log, Config: cfg.Notify, PublicURL: cfg.Server.PublicURL},
 		SecretsFor: func(a engine.Automation, runID string) secrets.Provider {
 			return secrets.Workspace{Store: st, Vault: v, ID: a.Workspace(), Fallback: sec, Actor: "automation:" + a.Name, RunID: runID}
 		},
@@ -131,11 +140,11 @@ func New(cfg config.Config, log *slog.Logger) (*Server, error) {
 	}
 	s := &Server{
 		cfg: cfg, log: log, store: st, secrets: SecretsProvider(cfg),
-		engine: eng, owner: ownerID(), wake: make(chan struct{}, 1),
+		engine: eng, hub: eng.Connectors, owner: ownerID(), wake: make(chan struct{}, 1),
 	}
 	api.SecretsProvider = func() secrets.Provider { return s.secrets }
 	s.api = api.New(&api.API{
-		Store: st, Vault: v, Config: cfg, Log: log,
+		Store: st, Vault: v, Config: cfg, Log: log, Hub: s.hub,
 		Snapshot: func() registry.Snapshot { s.mu.RLock(); defer s.mu.RUnlock(); return s.snap },
 		Health:   s.health,
 		Wake: func() {
@@ -201,6 +210,8 @@ func (s *Server) Run(ctx context.Context) error {
 	start(func() { s.sched.Run(claimCtx, TickInterval) })
 	start(func() { s.every(claimCtx, ReloadInterval, func(c context.Context) { _ = s.reload(c) }) })
 	start(func() { s.every(claimCtx, Lease, s.recover) })
+	start(func() { s.every(claimCtx, EmailPollTick, s.pollEmail) })
+	start(func() { s.every(claimCtx, time.Minute, s.expireApprovals) })
 	start(func() { s.every(claimCtx, 24*time.Hour, s.prune) })
 	if s.cfg.Heartbeat.URL != "" {
 		start(func() { s.every(claimCtx, s.cfg.Heartbeat.Interval.Std(), s.heartbeat) })
@@ -371,6 +382,9 @@ func (s *Server) armSetup(ctx context.Context) error {
 }
 
 func (s *Server) prune(ctx context.Context) {
+	if err := s.store.PruneEmailSeen(ctx, time.Now().Add(-60*24*time.Hour)); err != nil {
+		s.log.Error("prune email state", "err", err)
+	}
 	if err := s.store.DeleteExpiredSessions(ctx, time.Now()); err != nil {
 		s.log.Error("prune sessions", "err", err)
 	}

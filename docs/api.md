@@ -21,6 +21,10 @@ Instance **owners** can do everything in every workspace. In a workspace:
 | See secret names | | | yes | yes |
 | Create, change, delete secrets | | | | yes |
 | Manage members, see the audit log | | | | yes |
+| See approvals and connections | yes | yes | yes | yes |
+| Approve or reject (when the approval lists the role) | | yes | | yes |
+| Test connections | | | yes | yes |
+| Create, change, delete connections; workspace settings | | | | yes |
 
 A user never sees a workspace they are not a member of: its endpoints answer 404. An owner's `Me.workspaces` lists every workspace, with role `owner`.
 
@@ -34,7 +38,10 @@ A user never sees a workspace they are not a member of: its endpoints answer 404
 - `Health.runner` is `local`, `ok`, or the reason the runner cannot be reached.
 - Validation: passwords need at least 12 bytes; secret names use letters, digits, `.`, `_` and `-` (up to 128); workspace ids use lowercase letters, digits and hyphens (up to 63).
 - When single sign-on fails, the callback redirects to `/login?error=<message for people>`.
-- Not available yet: cancelling a run, renaming or deleting workspaces, deleting users (disable them instead), approvals (phase 3).
+- Connection names use lowercase letters, digits, `_` and `-`, starting with a letter (up to 63). `PUT` on an existing name replaces its settings and keeps omitted secrets; an empty secret value removes it. For MCP, `secrets` keys are header names and `secretsSet` lists the saved header names. Connections cannot be renamed.
+- `GET .../approvals` without `status` returns all approvals, newest first (at most 100); `status` can be `pending`, `approved`, `rejected` or `expired`. Approving or rejecting an approval that is no longer pending answers 409 `conflict`. Approvals that time out are decided by `timeout` at the moment Pendolo notices (within a minute of `expiresAt`), as `expired` or, with `onTimeout: approve`, `approved`.
+- Anyone whose role is listed in an approval's `approvers` can decide it, plus admins and owners.
+- Not available yet: cancelling a run, renaming or deleting workspaces, deleting users (disable them instead).
 
 ## Endpoints
 
@@ -70,6 +77,18 @@ A user never sees a workspace they are not a member of: its endpoints answer 404
 | `PUT /api/v1/workspaces/{ws}/members` | admin | `{email, role}` | 204 |
 | `DELETE /api/v1/workspaces/{ws}/members/{userId}` | admin | | 204 |
 | `GET /api/v1/workspaces/{ws}/audit?limit=` | admin | | `{entries: AuditEntry[]}` |
+| `GET /api/v1/connectors` | signed in | | `ConnectorCatalog` |
+| `GET /api/v1/workspaces/{ws}/connections` | viewer | | `{connections: Connection[]}` |
+| `PUT /api/v1/workspaces/{ws}/connections/{name}` | admin | `ConnectionInput` | `Connection` |
+| `DELETE /api/v1/workspaces/{ws}/connections/{name}` | admin | | 204 |
+| `POST /api/v1/workspaces/{ws}/connections/{name}/test` | builder | | `ConnectionTest` |
+| `POST /api/v1/workspaces/{ws}/connections/{name}/oauth/start` | admin | | `{url}`: send the browser there |
+| `GET /api/v1/oauth/callback` | provider | | redirect to `/w/{ws}/connections?connected={name}` or `?error=<message>` |
+| `GET /api/v1/workspaces/{ws}/approvals?status=pending` | viewer | | `{approvals: Approval[]}` |
+| `POST /api/v1/workspaces/{ws}/approvals/{id}/approve` | listed approver role, admin | `{comment?}` | `Approval` |
+| `POST /api/v1/workspaces/{ws}/approvals/{id}/reject` | listed approver role, admin | `{comment?}` | `Approval` |
+| `GET /api/v1/workspaces/{ws}/settings` | viewer | | `WorkspaceSettings` |
+| `PATCH /api/v1/workspaces/{ws}/settings` | admin | `{name?, maxAutonomy?}` | `WorkspaceSettings` |
 | `POST /api/v1/workspaces` | owner | `{id, name}` | `WorkspaceRef` |
 | `GET /api/v1/users` | owner | | `{users: User[]}` |
 | `POST /api/v1/users` | owner | `{email, name, password, isOwner}` | `User` |

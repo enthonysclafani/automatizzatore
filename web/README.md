@@ -49,4 +49,4 @@ src/pages/        one file per screen
 src/router.tsx    all routes (code-based)
 ```
 
-Conventions: money is `€0.0000` below €1 and `€0.00` above; status colors are the same everywhere (succeeded green, failed red, running blue, queued and skipped gray, cancelled amber) and always come with an icon and a label. Chart colors live in `src/components/charts/palette.ts` and were checked for color-blind separation in light and dark mode; every chart has a Table view.
+Conventions: money is `€0.0000` below €1 and `€0.00` above; status colors are the same everywhere (succeeded green, failed red, running blue, waiting for approval burnt orange with an hourglass, queued and skipped gray, cancelled amber) and always come with an icon and a label. Waiting is lightness-separated from amber and red so it stays distinct under colour blindness. Connector action risks use one color each: read gray, write blue, send amber, destructive red. Chart colors live in `src/components/charts/palette.ts` and were checked for color-blind separation in light and dark mode; every chart has a Table view.

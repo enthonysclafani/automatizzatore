@@ -6,7 +6,8 @@ automationsDir: /automations   # one folder per automation
 workers: 4                     # runs executed at the same time
 
 server:
-  listen: ":8080"              # /healthz and /hooks/<automation> live here
+  listen: ":8080"              # dashboard, API, /healthz and /hooks/<automation>
+  publicURL: http://localhost:8080   # how browsers reach Pendolo (OAuth redirects, links)
 
 # Shell steps run in the separate runner container (see docker-compose.yml).
 # Remove this block to run scripts inside the server instead.

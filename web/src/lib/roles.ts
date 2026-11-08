@@ -1,4 +1,4 @@
-import type { EffectiveRole, Me, Role } from "../api/types";
+import type { Approval, EffectiveRole, Me, Role } from "../api/types";
 
 const RANK: Record<EffectiveRole, number> = {
   viewer: 0,
@@ -27,4 +27,18 @@ export function roleIn(me: Me | undefined, workspace: string): EffectiveRole | u
   const ref = me.workspaces.find((w) => w.id === workspace);
   if (ref) return ref.role;
   return me.isOwner ? "owner" : undefined;
+}
+
+/** Admins and owners decide every approval; other roles only when the approval lists them. */
+export function canDecide(role: EffectiveRole | undefined, approval: Pick<Approval, "approvers">): boolean {
+  if (!role) return false;
+  if (atLeast(role, "admin")) return true;
+  return role !== "owner" && approval.approvers.includes(role);
+}
+
+/** "approver or admin" for the "Only ... can decide" note. */
+export function approversText(approvers: Role[]): string {
+  const list = [...new Set<string>([...approvers, "admin"])];
+  if (list.length === 1) return `${list[0]}s`;
+  return `${list.slice(0, -1).map((r) => `${r}s`).join(", ")} and ${list[list.length - 1]}s`;
 }

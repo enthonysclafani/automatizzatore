@@ -31,6 +31,9 @@ Open `http://localhost:8080`. The first time, the dashboard asks for the setup t
 - **Automations**: state, triggers, last and next run; run now, pause, resume; the manifest as written.
 - **Runs**: every run, filterable; each run step by step with logs, inputs, outputs, errors, and every model call with prompt, answer, tokens and cost.
 - **Costs**: spending per day, per automation and per model.
+- **Approvals**: runs waiting for a person, with what will happen if approved; approve or reject with a comment.
+- **Connections**: Google, Slack, web search and MCP servers, with a setup guide for each, a test button and the actions each offers with their risk.
+- **Settings**: the workspace's maximum autonomy.
 - **Secrets**, **Members**, **Audit**: per workspace, for the roles allowed.
 - **Users & workspaces**, **System**: for owners.
 - **Account**: password, two-factor authentication, API tokens.
@@ -42,9 +45,9 @@ An automation belongs to the workspace named in its `metadata.workspace` (`defau
 | Role | Can |
 | --- | --- |
 | viewer | See automations, runs and costs |
-| approver | Same as viewer today; approves risky actions from phase 3 |
+| approver | Also approve or reject runs that wait for a person |
 | builder | Also run, pause and resume automations, and see secret names |
-| admin | Also manage secrets, members and read the audit log |
+| admin | Also approve, manage secrets, connections, members and settings, and read the audit log |
 | owner (instance) | Everything, in every workspace, plus users and workspaces |
 
 Every sign-in, change and secret read by an automation is recorded in the audit log. The API behind the dashboard is documented in [api.md](api.md); scripts use API tokens from the Account page.

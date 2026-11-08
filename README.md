@@ -9,9 +9,9 @@ Pendolo is a self-hosted automation engine. You describe what you want in plain 
 - **Runs anywhere.** One binary and one container image for Linux, macOS and Windows, on amd64 and arm64.
 - **Transparent.** Every run, step, model call, cost and approval is recorded.
 
-**Status: phase 2 complete.** A dashboard with sign-in (passwords, two-factor, single sign-on), workspaces with roles, encrypted secrets, an audit log, run timelines and costs, on top of the phase 1 engine.
+**Status: phase 3 complete.** Connectors (Gmail, Google Docs, Slack, web search, any MCP server), agent steps that work with tools, approvals that pause a run until a person decides, autonomy levels enforced on every action, and email triggers; on top of the dashboard (phase 2) and the engine (phase 1).
 
-The engine runs schedules and webhook triggers through a run queue, with `http`, `shell`, `llm` and `foreach` steps, any model provider, secrets, scripts isolated in a separate runner container, notifications by webhook, Slack, Telegram and email, and full run history in SQLite. The connectors come next; see the [roadmap](#roadmap).
+The engine runs schedules and webhook triggers through a run queue, with `http`, `shell`, `llm` and `foreach` steps, any model provider, secrets, scripts isolated in a separate runner container, notifications by webhook, Slack, Telegram and email, and full run history in SQLite. The AI builder comes next; see the [roadmap](#roadmap).
 
 ## Try it
 
@@ -41,14 +41,14 @@ steps:
     expect: { status: [200], maxLatency: 2s }
 ```
 
-The full format is in [docs/manifest.md](docs/manifest.md), the server settings in [docs/configuration.md](docs/configuration.md), and how to run and operate Pendolo in [docs/running.md](docs/running.md). Ready-made automations are in [templates/](templates):
+The full format is in [docs/manifest.md](docs/manifest.md), the services automations can use in [docs/connectors.md](docs/connectors.md), the server settings in [docs/configuration.md](docs/configuration.md), and how to run and operate Pendolo in [docs/running.md](docs/running.md). Ready-made automations are in [templates/](templates):
 
 | Template | What it does |
 | --- | --- |
 | [site-checks](templates/site-checks) | Checks uptime, TLS and server health; alerts only on problems. Runs today. |
-| [gmail-triage](templates/gmail-triage) | Labels new email and drafts replies, never sends. Needs the phase 3 connectors. |
-| [gmail-digest](templates/gmail-digest) | Sends a daily email digest to Slack. Needs the phase 3 connectors. |
-| [editorial-plan](templates/editorial-plan) | Finds article ideas, validates them on OpenSEO, writes the plan to Google Docs. Needs the phase 3 connectors. |
+| [gmail-triage](templates/gmail-triage) | Labels new email and drafts replies, never sends. |
+| [gmail-digest](templates/gmail-digest) | Sends a daily email digest to Slack. |
+| [editorial-plan](templates/editorial-plan) | Finds article ideas with an agent, validates them on OpenSEO, writes the plan to Google Docs, posts it on Slack. |
 
 ## Commands
 
@@ -92,7 +92,10 @@ internal/secrets/     secret:// references and redaction
 internal/registry/    loads the automations folder
 internal/notify/      run notifications
 internal/server/      wires it all into a long-running process
-internal/api/         the dashboard's JSON API: sign-in, roles, workspaces
+internal/api/         the dashboard's JSON API: sign-in, roles, workspaces, connections, approvals
+internal/connectors/  Gmail, Google Docs, Slack, web search, MCP; actions and their risk
+internal/e2e/         templates run end to end against fake services
+internal/testfakes/   fake Gmail, Docs, Slack, search, MCP server and model for tests
 internal/auth/        passwords, two-factor codes, tokens, rate limits
 internal/vault/       encryption with the master key
 internal/webui/       the built dashboard, embedded in the binary
@@ -111,7 +114,7 @@ docs/                 documentation
 | 0. Foundations (done) | Repo, CI, manifest schema, validator | A YAML manifest is validated from the CLI |
 | 1. Engine (done) | Scheduler, queue, http/shell/llm steps, SQLite, `pendolo run` | Site checks run for 7 days without stopping |
 | 2. Dashboard (done) | Login, OIDC, roles, workspaces, encrypted secrets, run timeline, costs | A viewer sees only their own workspace |
-| 3. Connectors | Gmail with a setup wizard, Slack, Google Docs, MCP, agent and approval steps | Email triage and editorial plan run end to end |
+| 3. Connectors (done) | Gmail with a setup wizard, Slack, Google Docs, MCP, agent and approval steps | Email triage and editorial plan run end to end |
 | 4. Builder and v0.1 | Plain language to manifest, templates, multi-arch image, security review | A sentence becomes an active automation |
 
 ## License

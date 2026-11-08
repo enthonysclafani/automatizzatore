@@ -1,16 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
-import type { LLMCall, RunDetail, Step } from "../api/types";
+import type { Approval, EffectiveRole, LLMCall, RunDetail, Step } from "../api/types";
+import {
+  ApprovalDetail,
+  ApprovalStatusBadge,
+  ApprovalTimes,
+  DecideActions,
+  DecisionNote,
+} from "../components/domain/Approvals";
 import { triggerTypeLabel } from "../components/domain/Triggers";
 import { dotColor, Tag } from "../components/ui/Badge";
 import { Card, CardBody, CardHeader } from "../components/ui/Card";
 import { CopyButton } from "../components/ui/Copy";
 import { cx } from "../components/ui/cx";
-import { IconAlert, IconChevronRight, IconSparkle } from "../components/ui/icons";
+import { IconAlert, IconChevronRight, IconHourglass, IconSparkle } from "../components/ui/icons";
+import { JsonDetails } from "../components/ui/JsonDetails";
 import { DefList, Page, PageHeader } from "../components/ui/Page";
 import { EmptyState, ErrorState, Skeleton, SkeletonRows } from "../components/ui/States";
-import { StatusBadge, StatusIcon, statusTone } from "../components/ui/StatusBadge";
+import { StatusBadge, StatusIcon, statusLabel, statusTone } from "../components/ui/StatusBadge";
 import { RelativeTime } from "../components/ui/Time";
 import {
   durationBetween,
@@ -25,7 +33,7 @@ import {
 } from "../lib/format";
 import { useNow } from "../lib/now";
 import { isActive, runQuery } from "../lib/queries";
-import { useWs } from "./WorkspaceGate";
+import { useWs, useWsRole } from "./WorkspaceGate";
 
 export function RunDetailPage() {
   const ws = useWs();
@@ -56,6 +64,44 @@ export function RunDetailPage() {
   );
 }
 
+/** The run is paused: show what it waits for, with the decision buttons inline. */
+function WaitingBanner({ ws, approvals, role }: { ws: string; approvals: Approval[]; role: EffectiveRole | undefined }) {
+  const pending = approvals.filter((a) => a.status === "pending");
+  return (
+    <section
+      aria-labelledby="waiting-title"
+      className="rounded-lg border-2 border-[var(--st-orange-dot)]/60 bg-[var(--st-orange-bg)] px-4 py-3"
+    >
+      <h2 id="waiting-title" className="flex items-center gap-2 text-sm font-semibold text-[var(--st-orange-fg)]">
+        <IconHourglass size={16} className="shrink-0" />
+        Waiting for approval
+      </h2>
+      {pending.length === 0 ? (
+        <p className="mt-1 text-[13px] text-fg">
+          The run is paused until someone decides.{" "}
+          <Link to="/w/$ws/approvals" params={{ ws }} className="font-medium text-accent hover:underline">
+            Open Approvals
+          </Link>
+        </p>
+      ) : (
+        <ul className="mt-2 space-y-3">
+          {pending.map((a) => (
+            <li key={a.id} className="space-y-2 rounded-md border border-line bg-surface p-3">
+              <p className="text-[12.5px] text-fg-2">
+                Step <span className="font-mono text-fg">{a.stepPath}</span>
+              </p>
+              <p className="text-sm break-words whitespace-pre-wrap text-fg">{a.message}</p>
+              <ApprovalTimes approval={a} />
+              <ApprovalDetail detail={a.detail} />
+              <DecideActions ws={ws} approval={a} role={role} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function Crumb({ ws }: { ws: string }) {
   return (
     <Link to="/w/$ws/runs" params={{ ws }} className="hover:text-fg hover:underline">
@@ -66,6 +112,8 @@ function Crumb({ ws }: { ws: string }) {
 
 function RunView({ ws, detail, refreshing }: { ws: string; detail: RunDetail; refreshing: boolean }) {
   const { run, llmCalls } = detail;
+  const approvals = detail.approvals ?? [];
+  const role = useWsRole();
   const now = useNow();
   const active = isActive(run.status);
   const duration = run.startedAt ? durationBetween(run.startedAt, run.finishedAt, now) : undefined;
@@ -100,6 +148,8 @@ function RunView({ ws, detail, refreshing }: { ws: string; detail: RunDetail; re
       />
 
       <div className="space-y-4">
+        {run.status === "waiting" && <WaitingBanner ws={ws} approvals={approvals} role={role} />}
+
         {run.error && (
           <div role="alert" className="flex gap-3 rounded-lg border border-[var(--st-red-dot)]/40 bg-[var(--st-red-bg)] px-4 py-3">
             <IconAlert size={16} className="mt-0.5 shrink-0 text-[var(--st-red-dot)]" />
@@ -178,6 +228,28 @@ function RunView({ ws, detail, refreshing }: { ws: string; detail: RunDetail; re
             )}
           </CardBody>
         </Card>
+
+        {approvals.length > 0 && (
+          <Card>
+            <CardHeader
+              title="Approvals"
+              description={`${approvals.length} requested by this run, oldest first`}
+            />
+            <ol className="divide-y divide-line">
+              {approvals.map((a) => (
+                <li key={a.id} className="space-y-1.5 px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ApprovalStatusBadge status={a.status} />
+                    <span className="font-mono text-[12.5px] text-fg">{a.stepPath}</span>
+                  </div>
+                  <p className="text-[13px] break-words whitespace-pre-wrap text-fg">{a.message}</p>
+                  <ApprovalTimes approval={a} />
+                  <DecisionNote approval={a} />
+                </li>
+              ))}
+            </ol>
+          </Card>
+        )}
 
         <Card>
           <CardHeader
@@ -300,7 +372,7 @@ function StepRow({ step, start, span, now }: { step: Step; start: number; span: 
             className={cx("shrink-0 text-muted transition-transform", open && "rotate-90", !hasDetails && "invisible")}
           />
           <StatusIcon status={step.status} />
-          <span className="sr-only">{step.status}</span>
+          <span className="sr-only">{statusLabel(step.status)}</span>
           <span className="min-w-0 truncate font-mono text-[12.5px] text-fg" title={step.path}>
             {label.index !== undefined && <span className="text-muted">[{label.index}] </span>}
             {label.name}
@@ -376,41 +448,6 @@ function Section({ title, copy, children }: { title: string; copy?: string; chil
       </div>
       {children}
     </div>
-  );
-}
-
-function JsonDetails({
-  label,
-  value,
-  defaultOpen,
-  className,
-}: {
-  label: string;
-  value: unknown;
-  defaultOpen?: boolean;
-  className?: string;
-}) {
-  const text = prettyJson(value);
-  return (
-    <details className={cx("group rounded-md border border-line bg-surface", className)} open={defaultOpen}>
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-fg-2 select-none hover:text-fg [&::-webkit-details-marker]:hidden">
-        <IconChevronRight size={12} className="transition-transform group-open:rotate-90" />
-        {label}
-        <span className="font-normal text-muted">{typeof value === "string" ? `${formatInt(value.length)} chars` : ""}</span>
-      </summary>
-      <div className="relative border-t border-line">
-        <div className="absolute top-2 right-2">
-          <CopyButton text={text} />
-        </div>
-        <pre
-          tabIndex={0}
-          aria-label={label}
-          className="max-h-96 overflow-auto p-3 pr-24 font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-words text-fg"
-        >
-          {text}
-        </pre>
-      </div>
-    </details>
   );
 }
 

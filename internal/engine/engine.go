@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/enthonysclafani/automatizzatore/internal/connectors"
 	"github.com/enthonysclafani/automatizzatore/internal/expr"
 	"github.com/enthonysclafani/automatizzatore/internal/llm"
 	"github.com/enthonysclafani/automatizzatore/internal/manifest"
@@ -27,9 +28,11 @@ const DefaultRunTimeout = 30 * time.Minute
 
 // Default step timeouts, when a step sets none.
 var defaultStepTimeout = map[string]time.Duration{
-	manifest.StepHTTP:  30 * time.Second,
-	manifest.StepShell: 10 * time.Minute,
-	manifest.StepLLM:   5 * time.Minute,
+	manifest.StepHTTP:      30 * time.Second,
+	manifest.StepShell:     10 * time.Minute,
+	manifest.StepLLM:       5 * time.Minute,
+	manifest.StepConnector: 2 * time.Minute,
+	manifest.StepAgent:     15 * time.Minute,
 }
 
 // Automation is a loaded, valid automation.
@@ -53,6 +56,12 @@ type Notifier interface {
 	Notify(ctx context.Context, a Automation, run *store.Run)
 }
 
+// ApprovalNotifier is implemented by Notifiers that want to know when a
+// run waits for a person.
+type ApprovalNotifier interface {
+	ApprovalRequested(ctx context.Context, a Automation, approval *store.Approval)
+}
+
 // Engine runs automations.
 type Engine struct {
 	Store    *store.Store
@@ -62,6 +71,9 @@ type Engine struct {
 	Notifier Notifier
 	// Shell runs shell steps; nil runs them as local child processes.
 	Shell runner.Executor
+	// Connectors resolves connector actions; nil makes connector and agent
+	// steps fail.
+	Connectors *connectors.Hub
 	// SecretsFor returns the secrets a run may use; nil means Secrets for
 	// every run. It lets each workspace keep its own secrets.
 	SecretsFor func(a Automation, runID string) secrets.Provider
@@ -114,6 +126,12 @@ type execution struct {
 	cost      float64
 	maxCost   float64
 	anomalies int
+	// offset is the index in the manifest of the first step this attempt runs.
+	offset int
+	// approved holds granted approvals by step path.
+	approved map[string]decision
+	// paused is set when the run stopped to wait for an approval.
+	paused *store.Approval
 }
 
 // Execute runs a, recording progress under run, which must already be in
@@ -133,7 +151,7 @@ func (e *Engine) Execute(ctx context.Context, run *store.Run, a Automation) Outc
 	if e.SecretsFor != nil {
 		provider = e.SecretsFor(a, run.ID)
 	}
-	ex := &execution{e: e, run: run, a: a, resolver: secrets.NewResolver(provider)}
+	ex := &execution{e: e, run: run, a: a, resolver: secrets.NewResolver(provider), approved: map[string]decision{}}
 	if m.Budget != nil {
 		ex.maxCost = m.Budget.MaxCostEur
 	}
@@ -149,9 +167,31 @@ func (e *Engine) Execute(ctx context.Context, run *store.Run, a Automation) Outc
 			"workspace": m.Metadata.Workspace, "runId": run.ID,
 		},
 	}
-	e.log().Info("run started", "automation", a.Name, "run", run.ID, "trigger", run.TriggerType)
+	steps := m.Steps
+	next, err := ex.resume(runCtx, env)
+	if err == nil && next > 0 {
+		if next > len(steps) {
+			next = len(steps)
+		}
+		steps = steps[next:]
+		e.log().Info("run resumed", "automation", a.Name, "run", run.ID, "from", next)
+	} else {
+		e.log().Info("run started", "automation", a.Name, "run", run.ID, "trigger", run.TriggerType)
+	}
+	if err == nil {
+		ex.offset = next
+		err = ex.runSteps(runCtx, steps, env, "")
+	}
 
-	err := ex.runSteps(runCtx, m.Steps, env, "")
+	if errors.Is(err, errPaused) && ex.paused != nil {
+		e.log().Info("run waiting for approval", "automation", a.Name, "run", run.ID, "step", ex.paused.StepPath)
+		if n, ok := e.Notifier.(ApprovalNotifier); ok {
+			rec, cancelRec := context.WithTimeout(context.Background(), 10*time.Second)
+			n.ApprovalRequested(rec, a, ex.paused)
+			cancelRec()
+		}
+		return Outcome{Status: store.RunWaiting, Anomalies: ex.anomalies, CostEur: ex.cost}
+	}
 
 	out := Outcome{Status: store.RunSucceeded, Anomalies: ex.anomalies, CostEur: ex.cost}
 	switch {
@@ -281,6 +321,13 @@ func (ex *execution) runSteps(ctx context.Context, steps []manifest.Step, env ex
 		}
 
 		o, attempts := ex.runWithRetry(ctx, st, env, path)
+		var na *needsApproval
+		if errors.As(o.err, &na) {
+			if prefix == "" {
+				return ex.pause(ex.offset+i, st, seq, path, results, na, o.input)
+			}
+			o.err = approvalInsideLoop(na)
+		}
 		status := store.StepSucceeded
 		if o.err != nil {
 			status = store.StepFailed
@@ -349,7 +396,8 @@ func (ex *execution) runWithRetry(ctx context.Context, st *manifest.Step, env ex
 			logs += "--- attempt " + strconv.Itoa(attempt) + " ---\n"
 		}
 		logs += o.logs
-		if o.err == nil || ctx.Err() != nil || errors.Is(o.err, errBudget) || errors.Is(o.err, errUnsupported) {
+		var na *needsApproval
+		if o.err == nil || ctx.Err() != nil || errors.Is(o.err, errBudget) || errors.Is(o.err, errUnsupported) || errors.As(o.err, &na) {
 			o.logs = logs
 			return o, attempt
 		}
@@ -361,7 +409,8 @@ func (ex *execution) runWithRetry(ctx context.Context, st *manifest.Step, env ex
 
 func (ex *execution) attempt(ctx context.Context, st *manifest.Step, env expr.Env, path string) stepOutcome {
 	timeout := defaultStepTimeout[st.Type]
-	if st.Timeout != "" {
+	// An approval step's timeout is how long it waits for a person.
+	if st.Timeout != "" && st.Type != manifest.StepApproval {
 		if d, err := time.ParseDuration(st.Timeout); err == nil {
 			timeout = d
 		}
@@ -382,8 +431,14 @@ func (ex *execution) attempt(ctx context.Context, st *manifest.Step, env expr.En
 		o = ex.execLLM(ctx, st, env, path)
 	case manifest.StepForeach:
 		o = ex.execForeach(ctx, st, env, path)
+	case manifest.StepConnector:
+		o = ex.execConnector(ctx, st, env, path)
+	case manifest.StepApproval:
+		o = ex.execApproval(st, env, path)
+	case manifest.StepAgent:
+		o = ex.execAgent(ctx, st, env, path)
 	default:
-		o.err = fmt.Errorf("step type %q is %w: it arrives with the connectors in phase 3", st.Type, errUnsupported)
+		o.err = fmt.Errorf("step type %q is %w", st.Type, errUnsupported)
 	}
 	if o.err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) && timeout > 0 {
 		o.err = fmt.Errorf("timed out after %s: %w", timeout, o.err)

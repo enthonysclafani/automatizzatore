@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../api/client";
@@ -6,6 +6,7 @@ import type { Me } from "../api/types";
 import { cx } from "../components/ui/cx";
 import {
   IconBolt,
+  IconCheckList,
   IconEuro,
   IconHome,
   IconKey,
@@ -14,15 +15,17 @@ import {
   IconMenu,
   IconMonitor,
   IconMoon,
+  IconPlug,
   IconScroll,
   IconServer,
+  IconSettings,
   IconSun,
   IconUser,
   IconUsers,
   IconX,
 } from "../components/ui/icons";
 import { Select } from "../components/ui/Select";
-import { useMe } from "../lib/queries";
+import { pendingApprovalsQuery, useMe } from "../lib/queries";
 import { atLeast, roleIn } from "../lib/roles";
 import { readStorage, STORAGE_KEYS } from "../lib/storage";
 import { setTheme, useThemeChoice, type ThemeChoice } from "../lib/theme";
@@ -124,7 +127,17 @@ function Brand() {
   );
 }
 
-const WS_SECTIONS = ["automations", "runs", "costs", "secrets", "members", "audit"] as const;
+const WS_SECTIONS = [
+  "automations",
+  "runs",
+  "approvals",
+  "costs",
+  "connections",
+  "secrets",
+  "members",
+  "audit",
+  "settings",
+] as const;
 
 function Sidebar({ autoFocus }: { autoFocus?: boolean }) {
   const { data: me } = useMe();
@@ -187,8 +200,14 @@ function Sidebar({ autoFocus }: { autoFocus?: boolean }) {
             <NavItem to="/w/$ws/runs" ws={ws} icon={<IconList size={16} />}>
               Runs
             </NavItem>
+            <NavItem to="/w/$ws/approvals" ws={ws} icon={<IconCheckList size={16} />} badge={<PendingCount ws={ws} />}>
+              Approvals
+            </NavItem>
             <NavItem to="/w/$ws/costs" ws={ws} icon={<IconEuro size={16} />}>
               Costs
+            </NavItem>
+            <NavItem to="/w/$ws/connections" ws={ws} icon={<IconPlug size={16} />}>
+              Connections
             </NavItem>
             {atLeast(role, "builder") && (
               <NavItem to="/w/$ws/secrets" ws={ws} icon={<IconKey size={16} />}>
@@ -203,6 +222,11 @@ function Sidebar({ autoFocus }: { autoFocus?: boolean }) {
             {atLeast(role, "admin") && (
               <NavItem to="/w/$ws/audit" ws={ws} icon={<IconScroll size={16} />}>
                 Audit
+              </NavItem>
+            )}
+            {atLeast(role, "admin") && (
+              <NavItem to="/w/$ws/settings" ws={ws} icon={<IconSettings size={16} />}>
+                Settings
               </NavItem>
             )}
           </ul>
@@ -244,20 +268,31 @@ type WsTo =
   | "/w/$ws"
   | "/w/$ws/automations"
   | "/w/$ws/runs"
+  | "/w/$ws/approvals"
   | "/w/$ws/costs"
+  | "/w/$ws/connections"
   | "/w/$ws/secrets"
   | "/w/$ws/members"
-  | "/w/$ws/audit";
+  | "/w/$ws/audit"
+  | "/w/$ws/settings";
 
 function NavItem(
   props:
-    | { to: WsTo; ws: string; exact?: boolean; icon: ReactNode; children: ReactNode }
-    | { to: "/admin/users" | "/admin/system" | "/account"; ws?: undefined; exact?: boolean; icon: ReactNode; children: ReactNode },
+    | { to: WsTo; ws: string; exact?: boolean; icon: ReactNode; children: ReactNode; badge?: ReactNode }
+    | {
+        to: "/admin/users" | "/admin/system" | "/account";
+        ws?: undefined;
+        exact?: boolean;
+        icon: ReactNode;
+        children: ReactNode;
+        badge?: undefined;
+      },
 ) {
   const inner = (
     <>
       <span className="shrink-0 text-muted">{props.icon}</span>
       {props.children}
+      {props.badge}
     </>
   );
   return (
@@ -283,6 +318,19 @@ function NavItem(
         </Link>
       )}
     </li>
+  );
+}
+
+/** Pending approvals in the workspace, as a count after the nav label. */
+function PendingCount({ ws }: { ws: string }) {
+  const { data } = useQuery(pendingApprovalsQuery(ws));
+  const n = data?.approvals.length ?? 0;
+  if (n === 0) return null;
+  return (
+    <span className="tnum ml-auto rounded-full bg-[var(--st-orange-bg)] px-1.5 text-[11.5px] leading-5 font-semibold text-[var(--st-orange-fg)]">
+      {n > 99 ? "99+" : n}
+      <span className="sr-only"> pending</span>
+    </span>
   );
 }
 

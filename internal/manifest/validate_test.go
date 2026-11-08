@@ -108,6 +108,7 @@ func TestInvalid(t *testing.T) {
 		{"unclosed expression", header + "  - id: a\n    type: http\n    request: { url: \"${steps.x.output\" }\n", "unclosed", 11},
 		{"empty expression", header + "  - id: a\n    type: http\n    request: { url: \"${ }\" }\n", "empty expression", 11},
 		{"if is not one expression", header + okStep + "  - id: a\n    type: http\n    if: steps.ping.failed\n    request: { url: x }\n", "single expression", 14},
+		{"approval inside foreach", header + okStep + "  - id: loop\n    type: foreach\n    items: \"${steps.ping.output}\"\n    steps:\n      - { id: ok, type: approval, message: hi }\n", "cannot be inside foreach", 0},
 		{"invalid output schema", header + "  - id: a\n    type: llm\n    promptText: hi\n    outputSchema: { type: banana }\n", "not a valid JSON Schema", 12},
 	}
 	for _, tc := range cases {

@@ -1,5 +1,8 @@
 # Every Monday: find article ideas, validate them on OpenSEO, write the plan
 # to Google Docs and post the link on Slack.
+#
+# Needs these connections: "google" (Google), "openseo" (MCP server with
+# your OpenSEO key), a web search connection and a Slack connection.
 apiVersion: pendolo/v1
 kind: Automation
 metadata:
@@ -13,7 +16,7 @@ triggers:
       timezone: Europe/Rome
       misfire: run_once
   - manual: {}
-autonomy: ask
+autonomy: auto
 budget:
   maxCostEur: 1.00
   timeout: 15m

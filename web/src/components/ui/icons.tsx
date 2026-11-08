@@ -236,3 +236,31 @@ export const IconSparkle = (p: IconProps) => (
     <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.7 1.8 1.8.7-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z" />
   </Svg>
 );
+export const IconHourglass = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M6.5 3h11M6.5 21h11M7.5 3c0 4.5 4.5 6 4.5 9s-4.5 4.5-4.5 9M16.5 3c0 4.5-4.5 6-4.5 9s4.5 4.5 4.5 9" />
+    <path d="M9.5 18.5h5" />
+  </Svg>
+);
+export const IconPlug = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M9 3v4M15 3v4M6 7h12v3a6 6 0 0 1-12 0zM12 16v5" />
+  </Svg>
+);
+export const IconSettings = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+    <circle cx="16" cy="7" r="2" />
+    <circle cx="10" cy="17" r="2" />
+  </Svg>
+);
+export const IconPencil = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" />
+  </Svg>
+);
+export const IconCheckList = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 7l1.5 1.5L8.5 5.5M4 13l1.5 1.5 3-3M4 19l1.5 1.5 3-3M12 7h8M12 13h8M12 19h8" />
+  </Svg>
+);

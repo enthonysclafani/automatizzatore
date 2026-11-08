@@ -46,20 +46,20 @@ Each trigger has exactly one key.
 
 A `webhook` trigger listens at `POST /hooks/<automation name>`. The caller proves it knows the secret with `Authorization: Bearer <secret>`, or signs the body with HMAC-SHA256 in `X-Pendolo-Signature` or `X-Hub-Signature-256` (`sha256=<hex>`, the format GitHub uses). The run receives `trigger.body` (text, up to 1 MiB), `trigger.json` (when the body is JSON), `trigger.headers` (lower-case, credentials removed) and `trigger.query`. The answer is `202` with the run id. Without `secret` anyone who can reach Pendolo can start the automation, and the validator warns about it.
 
-The `email` trigger arrives with the Gmail connector in phase 3.
+An `email` trigger checks a Google connection every `interval` (default 5m, at least 1m) for messages matching `query` (Gmail search syntax, default `in:inbox`) and starts one run per new message, up to 20 per check. The first check only remembers what is already in the mailbox. The run reads the message as `trigger.email`: `id`, `threadId`, `from`, `to`, `cc`, `subject`, `date`, `snippet`, `body` (plain text, up to 100 KB), `labels`.
 
 ## Autonomy
 
-The level combines with the risk each connector action declares (read, write, send, destructive):
+Every connector action declares a risk: **read**; **write**, a change that stays reversible (a label, a draft, a new document); **send**, something that reaches other people (an email, a chat message); **destructive**, a deletion or overwrite. The automation's level decides what each risk may do:
 
 | Level | Read | Write | Send to others | Destructive |
 | --- | --- | --- | --- | --- |
 | `observe` | allowed | blocked | blocked | blocked |
-| `draft` | allowed | as a draft | as a draft | blocked |
-| `ask` | allowed | allowed | asks for approval | asks for approval |
-| `auto` | allowed | allowed | allowed | asks for approval |
+| `draft` | allowed | allowed | becomes a draft (e.g. `gmail.send` saves a draft), or blocked when there is no draft form | blocked |
+| `ask` (default) | allowed | allowed | waits for approval | waits for approval |
+| `auto` | allowed | allowed | allowed | waits for approval |
 
-A workspace sets a maximum level that no automation can exceed.
+A workspace sets a maximum level (Settings page) that no automation can exceed. When a `connector` step waits for approval, the run pauses with status `waiting` until an approver decides on the Approvals page; approved, it resumes at that step; rejected or expired (after 24 hours), it is cancelled. Inside an `agent` step, tools that would need approval are refused instead, since an agent cannot pause halfway through. Runs pause only between top-level steps, so an action that needs approval cannot be inside a `foreach`.
 
 ## Steps
 
@@ -125,12 +125,19 @@ The validator parses every expression and checks that names exist, that `steps.<
 | `shell` | `exitCode`, `stdout`, `stderr` (1 MiB each), `json` when stdout is JSON |
 | `llm` | The answer as text, or the parsed object when `outputSchema` is set |
 | `foreach` | A list with, for each item, the outputs of its nested steps by id |
+| `connector` | What the action returns (see [connectors.md](connectors.md)) |
+| `agent` | The object passed to `finish` when `outputSchema` is set, else the final text |
+| `approval` | `approved`, `by`, `comment`, `at` |
 
 An `http` step fails on a status of 400 or more unless `expect.status` says otherwise. A `shell` step fails on a non-zero exit code. Shell steps run in the separate runner container when one is configured (see [running.md](running.md)). A failed step stops the run unless it has `continueOnError: true`; the run then still succeeds, and the failure counts as an anomaly for notifications.
 
 ### Available today
 
-`http`, `shell`, `llm` and `foreach` run now. `foreach` runs up to `concurrency` items at a time (default 1); the first failing item stops the others. `connector`, `agent` and `approval` steps validate but fail at run time with a clear message until phase 3.
+All step types run. `foreach` runs up to `concurrency` items at a time (default 1); the first failing item stops the others.
+
+- **connector**: `action` is `<connector>.<action>` (e.g. `gmail.apply_labels`) or `<MCP connection>.<tool>`; `with` is its input, checked against the action's schema; `connection` picks a connection when the workspace has several of the kind. See [connectors.md](connectors.md).
+- **agent**: a model that works in a loop with the `tools` you list (connector actions), up to `maxIterations` turns (default 20) and `maxCostEur`. With `outputSchema`, it ends by calling a `finish` tool whose input must match the schema. What tools return is presented as data, never as instructions.
+- **approval**: pauses the run until someone with a role in `approvers` (default approver and admin) approves; `timeout` (default 24h) and `onTimeout` (`reject` by default) say what happens if nobody does. `message` may use expressions.
 
 ### Notifications
 

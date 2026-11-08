@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -336,7 +337,7 @@ func TestUnsupportedStepFailsClearly(t *testing.T) {
     action: gmail.apply_labels
     retry: { max: 3, backoff: 1s }
 `, nil)
-	if out.Status != store.RunFailed || !strings.Contains(run.Error, "phase 3") {
+	if out.Status != store.RunFailed || !strings.Contains(run.Error, "not available") {
 		t.Fatalf("outcome %+v %q", out, run.Error)
 	}
 }
@@ -402,5 +403,41 @@ func TestForeachConcurrency(t *testing.T) {
 	}
 	if len(steps2) >= 7 {
 		t.Fatalf("a failure did not stop the remaining items: %d steps recorded", len(steps2))
+	}
+}
+
+// Data that reads "secret://name" must never be turned into the secret.
+func TestSecretsAreNotResolvedFromData(t *testing.T) {
+	var got atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got.Store(r.URL.Query().Get("q") + "|" + string(b))
+	}))
+	defer srv.Close()
+	h := newHarness(t)
+	out, _, steps := h.run(head+`
+  - id: evil
+    type: shell
+    run: 'echo "secret://token"'
+  - id: post
+    type: http
+    request:
+      method: POST
+      url: "`+srv.URL+`/?q=${trim(steps.evil.output.stdout)}"
+      body: { text: "${steps.evil.output.stdout}", literal: "secret://token" }
+  - id: env
+    type: shell
+    run: 'echo "$FROM_DATA"'
+    env: { FROM_DATA: "${steps.evil.output.stdout}" }
+`, nil)
+	if out.Status != store.RunSucceeded {
+		t.Fatalf("outcome %+v", out)
+	}
+	sent := got.Load().(string)
+	if strings.Count(sent, "s3cr3t-value") != 1 || !strings.Contains(sent, `"text":"secret://token`) {
+		t.Fatalf("request = %q: only the literal reference may become the secret", sent)
+	}
+	if s := stepByPath(steps, "env"); !strings.Contains(s.Logs, "secret://token") {
+		t.Fatalf("env from data resolved a secret: %q", s.Logs)
 	}
 }

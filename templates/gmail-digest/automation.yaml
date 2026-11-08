@@ -19,7 +19,7 @@ steps:
   - id: fetch
     type: connector
     action: gmail.search
-    connection: gmail
+    connection: google
     with:
       query: "label:pendolo newer_than:1d"
       maxResults: 100

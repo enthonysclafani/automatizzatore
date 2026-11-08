@@ -3,9 +3,15 @@
 
 import type {
   ApiToken,
+  Approval,
   AuditEntry,
   AutomationDetail,
   AutomationSummary,
+  Autonomy,
+  Connection,
+  ConnectionInput,
+  ConnectionTest,
+  ConnectorCatalog,
   Costs,
   LoginRequest,
   Me,
@@ -22,6 +28,7 @@ import type {
   SystemInfo,
   User,
   WorkspaceRef,
+  WorkspaceSettings,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -132,6 +139,13 @@ export interface RunQuery {
   before?: string;
 }
 
+export type ApprovalStatus = Approval["status"];
+
+export interface SettingsPatch {
+  name?: string;
+  maxAutonomy?: Autonomy;
+}
+
 export interface UserPatch {
   name?: string;
   disabled?: boolean;
@@ -190,6 +204,32 @@ export const api = {
     request<void>("DELETE", `${ws(w)}/members/${enc(userId)}`),
   workspaceAudit: (w: string, limit?: number) =>
     request<{ entries: AuditEntry[] }>("GET", `${ws(w)}/audit${qs({ limit })}`),
+
+  // Connections
+  connectors: () => request<ConnectorCatalog>("GET", "/connectors"),
+  listConnections: (w: string) => request<{ connections: Connection[] }>("GET", `${ws(w)}/connections`),
+  putConnection: (w: string, name: string, body: ConnectionInput) =>
+    request<Connection>("PUT", `${ws(w)}/connections/${enc(name)}`, body),
+  deleteConnection: (w: string, name: string) => request<void>("DELETE", `${ws(w)}/connections/${enc(name)}`),
+  testConnection: (w: string, name: string) =>
+    request<ConnectionTest>("POST", `${ws(w)}/connections/${enc(name)}/test`),
+  /** Returns the provider URL; send the browser there with window.location. */
+  startOAuth: (w: string, name: string) =>
+    request<{ url: string }>("POST", `${ws(w)}/connections/${enc(name)}/oauth/start`),
+
+  // Approvals
+  /** Without a status the server returns every approval it keeps (pending and decided). */
+  listApprovals: (w: string, status?: ApprovalStatus) =>
+    request<{ approvals: Approval[] }>("GET", `${ws(w)}/approvals${qs({ status })}`),
+  approve: (w: string, id: string, comment?: string) =>
+    request<Approval>("POST", `${ws(w)}/approvals/${enc(id)}/approve`, comment ? { comment } : {}),
+  reject: (w: string, id: string, comment?: string) =>
+    request<Approval>("POST", `${ws(w)}/approvals/${enc(id)}/reject`, comment ? { comment } : {}),
+
+  // Workspace settings
+  getSettings: (w: string) => request<WorkspaceSettings>("GET", `${ws(w)}/settings`),
+  patchSettings: (w: string, patch: SettingsPatch) =>
+    request<WorkspaceSettings>("PATCH", `${ws(w)}/settings`, patch),
 
   // Instance (owners)
   createWorkspace: (id: string, name: string) => request<WorkspaceRef>("POST", "/workspaces", { id, name }),

@@ -138,6 +138,9 @@ func (v *semantic) checkSteps(steps []any, ptr string, visible map[string]bool, 
 			}
 		}
 
+		if sm["type"] == StepApproval && foreach != "" {
+			v.add(SeverityError, sp+"/type", "approval steps cannot be inside foreach: a run pauses only between top-level steps")
+		}
 		if run, ok := sm["run"].(string); ok && sm["type"] == StepShell {
 			v.checkShellRun(run, sp+"/run")
 		}

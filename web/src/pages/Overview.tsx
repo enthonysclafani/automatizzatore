@@ -8,7 +8,7 @@ import { runNote } from "../components/domain/RunsTable";
 import { dotColor, type Tone } from "../components/ui/Badge";
 import { Card, CardBody, CardHeader } from "../components/ui/Card";
 import { cx } from "../components/ui/cx";
-import { IconCheckCircle, IconClock } from "../components/ui/icons";
+import { IconCheckCircle, IconChevronRight, IconClock, IconHourglass } from "../components/ui/icons";
 import { Page, PageHeader } from "../components/ui/Page";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/States";
 import { StatusIcon } from "../components/ui/StatusBadge";
@@ -64,6 +64,26 @@ function OverviewBody({ ws, data }: { ws: string; data: Overview }) {
   const monthName = new Intl.DateTimeFormat(undefined, { month: "long" }).format(new Date());
   return (
     <div className="space-y-4">
+      {data.waitingApprovals > 0 && (
+        <Link
+          to="/w/$ws/approvals"
+          params={{ ws }}
+          className="flex items-center gap-3 rounded-lg border-2 border-[var(--st-orange-dot)]/60 bg-[var(--st-orange-bg)] px-4 py-3 hover:border-[var(--st-orange-dot)]"
+        >
+          <IconHourglass size={20} className="shrink-0 text-[var(--st-orange-fg)]" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-[var(--st-orange-fg)]">
+              {data.waitingApprovals === 1
+                ? "1 step is waiting for approval"
+                : `${formatInt(data.waitingApprovals)} steps are waiting for approval`}
+            </span>
+            <span className="block text-[12.5px] text-fg-2">Their runs are paused until someone approves or rejects.</span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1 text-[13px] font-medium text-accent">
+            Review <IconChevronRight size={14} />
+          </span>
+        </Link>
+      )}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <HealthTile health={data.health} />
         <Tile
@@ -110,7 +130,14 @@ function OverviewBody({ ws, data }: { ws: string; data: Overview }) {
         <Tile
           label="Running now"
           value={formatInt(data.running)}
-          detail={`${formatInt(data.queued)} queued`}
+          detail={
+            <>
+              {formatInt(data.queued)} queued
+              {data.waitingApprovals > 0 && (
+                <span className="text-[var(--st-orange-fg)]"> · {formatInt(data.waitingApprovals)} waiting</span>
+              )}
+            </>
+          }
           dot={data.running > 0 ? "blue" : undefined}
           href={{ to: "/w/$ws/runs", ws }}
         />

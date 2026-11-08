@@ -15,9 +15,11 @@ import { COST_PERIODS, DEFAULT_COST_PERIOD, RUN_STATUSES, safeRedirect, type Cos
 import { meQuery, setupQuery } from "./lib/queries";
 import { SystemPage } from "./pages/admin/System";
 import { UsersPage } from "./pages/admin/Users";
+import { ApprovalsPage } from "./pages/Approvals";
 import { AuditPage } from "./pages/Audit";
 import { AutomationDetailPage } from "./pages/AutomationDetail";
 import { AutomationsPage } from "./pages/Automations";
+import { ConnectionsPage } from "./pages/Connections";
 import { HomeRedirect } from "./pages/HomeRedirect";
 import { LoginPage } from "./pages/Login";
 import { MembersPage } from "./pages/Members";
@@ -25,6 +27,7 @@ import { NotFoundPage } from "./pages/NotFound";
 import { RunDetailPage } from "./pages/RunDetail";
 import { RunsPage } from "./pages/Runs";
 import { SecretsPage } from "./pages/Secrets";
+import { SettingsPage } from "./pages/Settings";
 import { SetupPage } from "./pages/Setup";
 import { WorkspaceGate } from "./pages/WorkspaceGate";
 
@@ -160,6 +163,31 @@ const auditRoute = createRoute({
   component: AuditPage,
 });
 
+const approvalsRoute = createRoute({
+  getParentRoute: () => wsRoute,
+  path: "approvals",
+  component: ApprovalsPage,
+});
+
+const connectionsRoute = createRoute({
+  getParentRoute: () => wsRoute,
+  path: "connections",
+  // The OAuth callback comes back with ?connected=<name> or ?error=<message>; the page shows it and clears it.
+  validateSearch: (s: Record<string, unknown>): { connected?: string; error?: string } => {
+    const out: { connected?: string; error?: string } = {};
+    if (typeof s.connected === "string" && s.connected) out.connected = s.connected.slice(0, 100);
+    if (typeof s.error === "string" && s.error) out.error = s.error.slice(0, 300);
+    return out;
+  },
+  component: ConnectionsPage,
+});
+
+const settingsRoute = createRoute({
+  getParentRoute: () => wsRoute,
+  path: "settings",
+  component: SettingsPage,
+});
+
 const usersRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "admin/users",
@@ -193,6 +221,9 @@ const routeTree = rootRoute.addChildren([
       secretsRoute,
       membersRoute,
       auditRoute,
+      approvalsRoute,
+      connectionsRoute,
+      settingsRoute,
     ]),
     usersRoute,
     systemRoute,

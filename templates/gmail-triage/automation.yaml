@@ -1,5 +1,8 @@
 # Classifies new Gmail messages, applies labels and drafts replies.
 # Autonomy "draft": replies are saved as Gmail drafts and never sent.
+#
+# Needs a Google connection named "google" (Connections page, Sign in with
+# Google) and, for the failure alerts, a Slack connection.
 apiVersion: pendolo/v1
 kind: Automation
 metadata:
@@ -9,7 +12,7 @@ metadata:
     template: v1
 triggers:
   - email:
-      connection: gmail
+      connection: google
       query: "in:inbox is:unread"
       interval: 5m
 autonomy: draft
@@ -24,7 +27,10 @@ steps:
     type: llm
     model: fast
     prompt: prompts/classify.md
-    input: "${trigger.email}"
+    input:
+      from: "${trigger.email.from}"
+      subject: "${trigger.email.subject}"
+      body: "${trigger.email.body}"
     outputSchema:
       type: object
       required: [category, needsReply, summary]
@@ -37,7 +43,7 @@ steps:
   - id: label
     type: connector
     action: gmail.apply_labels
-    connection: gmail
+    connection: google
     with:
       messageId: "${trigger.email.id}"
       labels: ["pendolo/${steps.classify.output.category}"]
@@ -48,14 +54,16 @@ steps:
     model: smart
     prompt: prompts/reply.md
     input:
-      email: "${trigger.email}"
+      from: "${trigger.email.from}"
+      subject: "${trigger.email.subject}"
+      body: "${trigger.email.body}"
       summary: "${steps.classify.output.summary}"
 
   - id: save_draft
     type: connector
     if: "${steps.classify.output.needsReply}"
     action: gmail.create_draft
-    connection: gmail
+    connection: google
     with:
-      threadId: "${trigger.email.threadId}"
+      messageId: "${trigger.email.id}"
       body: "${steps.draft_reply.output}"

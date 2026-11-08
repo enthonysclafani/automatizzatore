@@ -294,7 +294,12 @@ func (a *API) getRun(w http.ResponseWriter, r *http.Request, _ *principal, ws st
 	if calls == nil {
 		calls = []store.LLMCall{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"run": run, "steps": steps, "llmCalls": calls})
+	approvals, err := a.Store.ListApprovals(r.Context(), store.ApprovalFilter{RunID: run.ID})
+	if err != nil {
+		a.internalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"run": run, "steps": steps, "llmCalls": calls, "approvals": approvals})
 }
 
 func monthStart(t time.Time) time.Time {
@@ -349,16 +354,22 @@ func (a *API) overview(w http.ResponseWriter, r *http.Request, _ *principal, ws 
 		a.internalError(w, err)
 		return
 	}
+	waiting, err := a.Store.CountPendingApprovals(ctx, ws)
+	if err != nil {
+		a.internalError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"health":         a.Health(ctx),
-		"automations":    map[string]int{"total": counts["total"], "active": counts["active"], "paused": counts["paused"], "invalid": counts["invalid"]},
-		"runs24h":        runs,
-		"running":        runs.Running,
-		"queued":         runs.Queued,
-		"costMonthEur":   cost,
-		"daily":          daily,
-		"recentFailures": failures,
-		"upcoming":       upcoming,
+		"waitingApprovals": waiting,
+		"health":           a.Health(ctx),
+		"automations":      map[string]int{"total": counts["total"], "active": counts["active"], "paused": counts["paused"], "invalid": counts["invalid"]},
+		"runs24h":          runs,
+		"running":          runs.Running,
+		"queued":           runs.Queued,
+		"costMonthEur":     cost,
+		"daily":            daily,
+		"recentFailures":   failures,
+		"upcoming":         upcoming,
 	})
 }
 

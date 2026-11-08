@@ -18,9 +18,12 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/oauth2"
+
 	"github.com/enthonysclafani/automatizzatore/internal/config"
 	"github.com/enthonysclafani/automatizzatore/internal/runner"
 	"github.com/enthonysclafani/automatizzatore/internal/store"
+	"github.com/enthonysclafani/automatizzatore/internal/testfakes"
 )
 
 func writeAutomation(t *testing.T, root, name, body string) {
@@ -326,4 +329,62 @@ func (m markExec) Exec(ctx context.Context, job runner.Job) (runner.Result, erro
 	m.calls.Add(1)
 	job.Env["RUNNER_MARK"] = "runner"
 	return runner.Local{}.Exec(ctx, job)
+}
+
+func TestEmailTriggerPolls(t *testing.T) {
+	cfg := testConfig(t)
+	writeAutomation(t, cfg.AutomationsDir, "inbox", `apiVersion: pendolo/v1
+kind: Automation
+metadata: { name: inbox }
+triggers: [ { email: { connection: google, query: "in:inbox", interval: 1m } } ]
+steps:
+  - { id: echo, type: shell, run: 'echo "$S"', env: { S: "${trigger.email.subject}" } }
+`)
+	g := testfakes.NewGoogle(t, &testfakes.Message{ID: "old", ThreadID: "t0", From: "x@y.it", Subject: "Already there", Body: "old"})
+	srv, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.store.Close()
+	srv.hub.Endpoints = map[string]string{"gmail": g.Server.URL}
+	ctx := context.Background()
+	tok, _ := json.Marshal(oauth2.Token{AccessToken: "at", RefreshToken: "rt", Expiry: time.Now().Add(time.Hour)})
+	sealed, _ := srv.hub.Seal("default", "google", map[string]string{"clientSecret": "s", "token": string(tok)})
+	_ = srv.store.EnsureWorkspace(ctx, "default", time.Now())
+	_ = srv.store.PutConnection(ctx, store.Connection{Workspace: "default", Name: "google", Kind: "google", Config: map[string]any{"clientId": "c"},
+		Sealed: sealed, Status: store.ConnReady, UpdatedAt: time.Now(), UpdatedBy: "t"})
+	if err := srv.reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.sched.Tick(ctx); err != nil { // become leader
+		t.Fatal(err)
+	}
+
+	srv.pollEmail(ctx) // arms: the message already there is not a run
+	if n, _ := srv.store.CountQueued(ctx); n != 0 {
+		t.Fatalf("arming enqueued %d runs", n)
+	}
+	g.Add(&testfakes.Message{ID: "new1", ThreadID: "t1", From: "anna@client.it", Subject: "Quote please", Body: "hi"})
+	srv.pollEmail(ctx) // not due yet
+	if n, _ := srv.store.CountQueued(ctx); n != 0 {
+		t.Fatalf("polled before the interval: %d", n)
+	}
+	_ = srv.store.SetTriggerState(ctx, "inbox", "email-0", store.TriggerState{NextRunAt: time.Now().Add(-time.Second)})
+	srv.pollEmail(ctx)
+	runs, _ := srv.store.ListRuns(ctx, store.RunFilter{Automation: "inbox"})
+	if len(runs) != 1 || runs[0].TriggerType != "email" || !strings.Contains(string(runs[0].TriggerData), "Quote please") {
+		t.Fatalf("runs = %+v", runs)
+	}
+	run, _ := srv.store.Claim(ctx, "w", time.Minute, time.Now())
+	srv.execute(ctx, run, "w")
+	steps, _ := srv.store.ListSteps(ctx, run.ID)
+	if len(steps) != 1 || !strings.Contains(steps[0].Logs, "Quote please") {
+		t.Fatalf("steps = %+v", steps)
+	}
+	// The same message never runs twice.
+	_ = srv.store.SetTriggerState(ctx, "inbox", "email-0", store.TriggerState{NextRunAt: time.Now().Add(-time.Second)})
+	srv.pollEmail(ctx)
+	if runs, _ := srv.store.ListRuns(ctx, store.RunFilter{Automation: "inbox"}); len(runs) != 1 {
+		t.Fatalf("message processed twice: %d runs", len(runs))
+	}
 }

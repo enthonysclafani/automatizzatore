@@ -8,7 +8,7 @@ export function safeRedirect(value: unknown): string | undefined {
   return value;
 }
 
-export const RUN_STATUSES: RunStatus[] = ["queued", "running", "succeeded", "failed", "cancelled"];
+export const RUN_STATUSES: RunStatus[] = ["queued", "running", "waiting", "succeeded", "failed", "cancelled"];
 
 export interface RunsSearch {
   automation?: string;

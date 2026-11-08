@@ -39,6 +39,9 @@ type Config struct {
 // Server configures the HTTP listener (health and, later, the API).
 type Server struct {
 	Listen string `yaml:"listen"`
+	// PublicURL is how people reach Pendolo, e.g. https://pendolo.example.com.
+	// OAuth redirects and links in notifications use it.
+	PublicURL string `yaml:"publicURL"`
 	// TrustProxy reads the client address and scheme from X-Forwarded-For
 	// and X-Forwarded-Proto. Enable it only behind a reverse proxy.
 	TrustProxy bool `yaml:"trustProxy"`
@@ -183,7 +186,7 @@ func Defaults() Config {
 		DataDir:        "data",
 		AutomationsDir: "automations",
 		Workers:        4,
-		Server:         Server{Listen: ":8080"},
+		Server:         Server{Listen: ":8080", PublicURL: "http://localhost:8080"},
 		Heartbeat:      Heartbeat{Interval: Duration(5 * time.Minute)},
 		Secrets:        Secrets{Dir: "/run/secrets", EnvPrefix: "PENDOLO_SECRET_", MasterKeyFile: "/run/secrets/pendolo-master-key"},
 		Auth:           Auth{SessionTTL: Duration(14 * 24 * time.Hour)},
@@ -212,6 +215,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("PENDOLO_AUTOMATIONS_DIR"); v != "" {
 		cfg.AutomationsDir = v
+	}
+	if v := os.Getenv("PENDOLO_PUBLIC_URL"); v != "" {
+		cfg.Server.PublicURL = v
 	}
 	if v := os.Getenv("PENDOLO_LISTEN"); v != "" {
 		cfg.Server.Listen = v

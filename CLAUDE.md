@@ -11,7 +11,7 @@ Self-hosted automation engine in Go. The AI writes automations as files; the eng
 
 ## Map
 
-- `internal/manifest`: format and validation. `internal/engine`: executes runs. `internal/runner`: executes scripts, locally or in `pendolo runner`. `internal/scheduler`: schedules to queued runs. `internal/store`: SQLite (migrations in `internal/store/migrations`, append-only). `internal/llm`: model gateway. `internal/server`: the long-running process. `internal/api`: dashboard API (contract in `web/src/api/types.ts` and `docs/api.md`). `web/`: React dashboard, built into `internal/webui/dist`. `cmd/pendolo`: CLI.
+- `internal/manifest`: format and validation. `internal/engine`: executes runs. `internal/runner`: executes scripts, locally or in `pendolo runner`. `internal/scheduler`: schedules to queued runs. `internal/store`: SQLite (migrations in `internal/store/migrations`, append-only). `internal/llm`: model gateway. `internal/server`: the long-running process. `internal/connectors`: connections and actions (each declares a risk). `internal/e2e`: templates end to end against `internal/testfakes`. `internal/api`: dashboard API (contract in `web/src/api/types.ts` and `docs/api.md`). `web/`: React dashboard, built into `internal/webui/dist`. `cmd/pendolo`: CLI.
 - Docs for users: `docs/manifest.md`, `docs/configuration.md`, `docs/running.md`.
 
 ## Rules
@@ -29,4 +29,6 @@ Self-hosted automation engine in Go. The AI writes automations as files; the eng
 - Schema changes to the database go in a new numbered migration file, never by editing an applied one.
 - Every workspace endpoint goes through `requireWorkspace` with a permission; non-members get 404. Add a case to `TestViewerSeesOnlyOwnWorkspace` for new endpoints.
 - API changes update `web/src/api/types.ts`, `docs/api.md` and the handler together.
+- A `secret://` reference is resolved only when it is a literal value in the manifest (`engine.render`), never from expression results, tool inputs or model output.
+- Every connector action declares its risk; the engine applies the autonomy policy (`engine.policy`) before calling it. New actions get a test in `internal/e2e` or `internal/connectors`.
 - Record state-changing actions with `audit`. Never log or return secret values, session tokens or API tokens.

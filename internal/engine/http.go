@@ -24,36 +24,23 @@ func (ex *execution) execHTTP(ctx context.Context, st *manifest.Step, env expr.E
 		method = http.MethodGet
 	}
 
-	urlV, err := expr.String(req.URL, env)
-	if err != nil {
-		return stepOutcome{err: err}
-	}
-	rawURL, err := ex.resolver.String(expr.Text(urlV))
+	rawURL, err := ex.renderText(req.URL, env)
 	if err != nil {
 		return stepOutcome{err: err}
 	}
 
-	headersV, err := expr.Value(req.Headers, env)
-	if err != nil {
-		return stepOutcome{err: err}
-	}
 	headers := map[string]string{}
-	if h, ok := headersV.(map[string]string); ok {
-		for k, v := range h {
-			if headers[k], err = ex.resolver.String(v); err != nil {
-				return stepOutcome{err: err}
-			}
+	for k, v := range req.Headers {
+		if headers[k], err = ex.renderText(v, env); err != nil {
+			return stepOutcome{err: err}
 		}
 	}
 
 	var body io.Reader
 	contentType := ""
 	if req.Body != nil {
-		bv, err := expr.Value(req.Body, env)
+		bv, err := ex.render(req.Body, env)
 		if err != nil {
-			return stepOutcome{err: err}
-		}
-		if bv, err = ex.resolver.Value(bv); err != nil {
 			return stepOutcome{err: err}
 		}
 		if s, ok := bv.(string); ok {

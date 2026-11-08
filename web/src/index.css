@@ -44,6 +44,10 @@
   --st-amber-fg: #8a5a00;
   --st-amber-bg: #fdf3dc;
   --st-amber-dot: #d48c00;
+  /* Waiting: burnt orange, lightness-separated from amber (cancelled) and red (failed). */
+  --st-orange-fg: #8a3c00;
+  --st-orange-bg: #fde8d8;
+  --st-orange-dot: #8a3c00;
   --st-gray-fg: #52514e;
   --st-gray-bg: #efeeea;
   --st-gray-dot: #898781;
@@ -81,6 +85,9 @@
     --st-amber-fg: #f3c467;
     --st-amber-bg: #352a12;
     --st-amber-dot: #e0a020;
+    --st-orange-fg: #f5a46a;
+    --st-orange-bg: #3d2312;
+    --st-orange-dot: #ad5f12;
     --st-gray-fg: #c3c2b7;
     --st-gray-bg: #2a2a28;
     --st-gray-dot: #898781;
@@ -118,6 +125,9 @@
   --st-amber-fg: #f3c467;
   --st-amber-bg: #352a12;
   --st-amber-dot: #e0a020;
+  --st-orange-fg: #f5a46a;
+  --st-orange-bg: #3d2312;
+  --st-orange-dot: #ad5f12;
   --st-gray-fg: #c3c2b7;
   --st-gray-bg: #2a2a28;
   --st-gray-dot: #898781;

@@ -27,23 +27,17 @@ func (ex *execution) execShell(ctx context.Context, st *manifest.Step, env expr.
 	}
 	args, _ := argsV.([]string)
 
-	envV, err := expr.Value(st.Env, env)
-	if err != nil {
-		return stepOutcome{err: err}
-	}
 	jobEnv := map[string]string{
 		"PENDOLO_RUN_ID":     ex.run.ID,
 		"PENDOLO_AUTOMATION": ex.a.Name,
 		"PENDOLO_STEP":       path,
 	}
 	var envNames []string
-	if m, ok := envV.(map[string]string); ok {
-		for k, v := range m {
-			if jobEnv[k], err = ex.resolver.String(v); err != nil {
-				return stepOutcome{err: fmt.Errorf("env %s: %w", k, err)}
-			}
-			envNames = append(envNames, k)
+	for k, v := range st.Env {
+		if jobEnv[k], err = ex.renderText(v, env); err != nil {
+			return stepOutcome{err: fmt.Errorf("env %s: %w", k, err)}
 		}
+		envNames = append(envNames, k)
 	}
 	sort.Strings(envNames)
 

@@ -21,6 +21,7 @@ import (
 
 	"github.com/enthonysclafani/automatizzatore/internal/auth"
 	"github.com/enthonysclafani/automatizzatore/internal/config"
+	"github.com/enthonysclafani/automatizzatore/internal/connectors"
 	"github.com/enthonysclafani/automatizzatore/internal/engine"
 	"github.com/enthonysclafani/automatizzatore/internal/registry"
 	"github.com/enthonysclafani/automatizzatore/internal/store"
@@ -46,6 +47,7 @@ type Health struct {
 type API struct {
 	Store  *store.Store
 	Vault  *vault.Vault
+	Hub    *connectors.Hub
 	Config config.Config
 	Log    *slog.Logger
 	// Snapshot returns the automations currently loaded.
@@ -64,6 +66,9 @@ type API struct {
 
 	oidcMu   sync.Mutex
 	oidcProv *oidcProvider
+
+	oauthMu     sync.Mutex
+	oauthStates map[string]oauthState
 }
 
 // New returns an API with its rate limits set.
@@ -101,7 +106,9 @@ const (
 	permOperate      = "operate"       // trigger, pause, resume
 	permSecretsRead  = "secrets.read"  // list secret names
 	permSecretsWrite = "secrets.write" // create, change, delete secrets
-	permManage       = "manage"        // members and audit log
+	permManage       = "manage"        // members, audit log, connections, settings
+	permConnTest     = "connections.test"
+	permApprove      = "approve" // further limited by the approval's own approvers
 )
 
 // RoleOwner is the effective role of instance owners in every workspace.
@@ -112,8 +119,10 @@ func can(role, perm string) bool {
 	case RoleOwner, store.RoleAdmin:
 		return true
 	case store.RoleBuilder:
-		return perm == permView || perm == permOperate || perm == permSecretsRead
-	case store.RoleApprover, store.RoleViewer:
+		return perm == permView || perm == permOperate || perm == permSecretsRead || perm == permConnTest
+	case store.RoleApprover:
+		return perm == permView || perm == permApprove
+	case store.RoleViewer:
 		return perm == permView
 	}
 	return false
@@ -138,6 +147,8 @@ func (a *API) Handler() http.Handler {
 	public("POST /api/v1/auth/login", a.login)
 	public("GET /api/v1/auth/oidc/login", a.oidcLogin)
 	public("GET /api/v1/auth/oidc/callback", a.oidcCallback)
+	public("GET /api/v1/oauth/callback", a.oauthCallback)
+	signedIn("GET /api/v1/connectors", a.catalog)
 
 	signedIn("POST /api/v1/auth/logout", a.logout)
 	signedIn("GET /api/v1/auth/me", a.me)
@@ -165,6 +176,16 @@ func (a *API) Handler() http.Handler {
 	ws("PUT /api/v1/workspaces/{ws}/members", permManage, a.putMember)
 	ws("DELETE /api/v1/workspaces/{ws}/members/{userId}", permManage, a.deleteMember)
 	ws("GET /api/v1/workspaces/{ws}/audit", permManage, a.workspaceAudit)
+	ws("GET /api/v1/workspaces/{ws}/connections", permView, a.listConnections)
+	ws("PUT /api/v1/workspaces/{ws}/connections/{name}", permManage, a.putConnection)
+	ws("DELETE /api/v1/workspaces/{ws}/connections/{name}", permManage, a.deleteConnection)
+	ws("POST /api/v1/workspaces/{ws}/connections/{name}/test", permConnTest, a.testConnection)
+	ws("POST /api/v1/workspaces/{ws}/connections/{name}/oauth/start", permManage, a.oauthStart)
+	ws("GET /api/v1/workspaces/{ws}/approvals", permView, a.listApprovals)
+	ws("POST /api/v1/workspaces/{ws}/approvals/{id}/approve", permApprove, a.approve)
+	ws("POST /api/v1/workspaces/{ws}/approvals/{id}/reject", permApprove, a.reject)
+	ws("GET /api/v1/workspaces/{ws}/settings", permView, a.getSettings)
+	ws("PATCH /api/v1/workspaces/{ws}/settings", permManage, a.patchSettings)
 
 	owner("POST /api/v1/workspaces", a.createWorkspace)
 	owner("GET /api/v1/users", a.listUsers)
