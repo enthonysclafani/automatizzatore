@@ -8,3 +8,5 @@ coverage.*
 .DS_Store
 .idea/
 .vscode/
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep

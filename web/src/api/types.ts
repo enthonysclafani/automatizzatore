@@ -28,7 +28,7 @@ export interface Me {
 }
 
 export interface SetupStatus {
-  /** True when no user exists: the dashboard shows the setup form. */
+  /** True when no owner exists: the dashboard shows the setup form. */
   needsSetup: boolean;
   oidc: { enabled: boolean; label: string };
 }

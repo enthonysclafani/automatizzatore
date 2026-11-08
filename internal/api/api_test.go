@@ -174,6 +174,17 @@ func TestSetup(t *testing.T) {
 	e.browser().expect("POST", "/api/v1/setup", map[string]string{"token": setupToken, "email": "x@y.co", "password": "another-password"}, 409)
 }
 
+func TestSetupWhileOnlyMembersExist(t *testing.T) {
+	e := newEnv(t)
+	_ = e.store.CreateUser(context.Background(), &store.User{Email: "early@example.com", CreatedAt: e.now})
+	var st struct{ NeedsSetup bool }
+	e.browser().do("GET", "/api/v1/setup", nil, &st)
+	if !st.NeedsSetup {
+		t.Fatal("setup closed although no owner exists")
+	}
+	e.setupOwner()
+}
+
 func TestLoginAndTOTP(t *testing.T) {
 	e := newEnv(t)
 	owner := e.setupOwner()

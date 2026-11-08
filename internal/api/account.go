@@ -62,7 +62,7 @@ func (a *API) writeMe(w http.ResponseWriter, r *http.Request, u *store.User) {
 }
 
 func (a *API) getSetup(w http.ResponseWriter, r *http.Request) {
-	n, err := a.Store.CountUsers(r.Context())
+	n, err := a.Store.CountOwners(r.Context())
 	if err != nil {
 		a.internalError(w, err)
 		return
@@ -87,7 +87,7 @@ func (a *API) postSetup(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	n, err := a.Store.CountUsers(r.Context())
+	n, err := a.Store.CountOwners(r.Context())
 	if err != nil {
 		a.internalError(w, err)
 		return

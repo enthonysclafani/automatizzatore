@@ -41,7 +41,7 @@ When an automation asks for `secret://name`, Pendolo looks first in the dashboar
 
 ## Sign-in and single sign-on
 
-While no user exists, the server logs a one-time **setup token**. Open the dashboard and create the first owner with it, or run `pendolo users create --email you@example.com --owner` on the server. Owners then create users and add them to workspaces with a role.
+While no owner exists, the server logs a one-time **setup token**. Open the dashboard and create the first owner with it, or run `pendolo users create --email you@example.com --owner` on the server. Owners then create users and add them to workspaces with a role.
 
 Passwords are hashed with Argon2id and need at least 12 characters. Users can turn on two-factor authentication (TOTP, any authenticator app) in their Account page. Sign-in is rate limited per address and per email. `pendolo users password --email ...` resets a password and turns two-factor off, for a locked-out user.
 

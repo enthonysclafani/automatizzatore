@@ -22,14 +22,26 @@ Instance **owners** can do everything in every workspace. In a workspace:
 | Create, change, delete secrets | | | | yes |
 | Manage members, see the audit log | | | | yes |
 
-A user never sees a workspace they are not a member of: its endpoints answer 404.
+A user never sees a workspace they are not a member of: its endpoints answer 404. An owner's `Me.workspaces` lists every workspace, with role `owner`.
+
+## Conventions
+
+- Times are RFC 3339 in UTC. Daily figures (`Overview.daily`, `Costs.daily`) and "this month" (`costMonthEur`) use UTC days.
+- `GET .../runs` returns at most `limit` runs (default 50, at most 200), newest first; pass `next` back as `before` for the next page.
+- `GET .../audit` and `GET /audit` return the newest `limit` entries (default 100, at most 1000).
+- `AutomationDetail.steps` lists nested steps too, with ids like `each.note` for a step inside a `foreach`.
+- `LLMCall.request` is what the gateway sent: `{model, system, user, schema?, temperature?, maxTokens, effort?, fallbacks?}`.
+- `Health.runner` is `local`, `ok`, or the reason the runner cannot be reached.
+- Validation: passwords need at least 12 bytes; secret names use letters, digits, `.`, `_` and `-` (up to 128); workspace ids use lowercase letters, digits and hyphens (up to 63).
+- When single sign-on fails, the callback redirects to `/login?error=<message for people>`.
+- Not available yet: cancelling a run, renaming or deleting workspaces, deleting users (disable them instead), approvals (phase 3).
 
 ## Endpoints
 
 | Method and path | Who | Body | Answer |
 | --- | --- | --- | --- |
 | `GET /api/v1/setup` | anyone | | `SetupStatus` |
-| `POST /api/v1/setup` | anyone, only while no user exists | `SetupRequest` | `Me` (and signs in) |
+| `POST /api/v1/setup` | anyone, only while no owner exists | `SetupRequest` | `Me` (and signs in) |
 | `POST /api/v1/auth/login` | anyone | `LoginRequest` | `Me` |
 | `POST /api/v1/auth/logout` | signed in | | 204 |
 | `GET /api/v1/auth/me` | signed in | | `Me` |

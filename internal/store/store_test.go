@@ -197,11 +197,8 @@ func TestNewIDSortable(t *testing.T) {
 
 func TestListRunsPagination(t *testing.T) {
 	s, ctx := open(t), context.Background()
-	var ids []string
 	for i := 0; i < 5; i++ {
-		id, _, _ := s.Enqueue(ctx, NewRun{Automation: "a", Workspace: "w", TriggerType: "manual"}, t0) // same millisecond
-		ids = append(ids, id)
-		time.Sleep(time.Microsecond)
+		_, _, _ = s.Enqueue(ctx, NewRun{Automation: "a", Workspace: "w", TriggerType: "manual"}, t0) // same timestamp
 	}
 	_, _, _ = s.Enqueue(ctx, NewRun{Automation: "b", Workspace: "other", TriggerType: "manual"}, t0)
 	page1, _ := s.ListRuns(ctx, RunFilter{Workspace: "w", Limit: 3})

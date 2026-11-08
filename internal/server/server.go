@@ -356,16 +356,16 @@ func (s *Server) recover(ctx context.Context) {
 	}
 }
 
-// armSetup prints a one-time setup token while no user exists, so only
+// armSetup prints a one-time setup token while no owner exists, so only
 // someone who can read the server log can create the first owner.
 func (s *Server) armSetup(ctx context.Context) error {
-	n, err := s.store.CountUsers(ctx)
+	n, err := s.store.CountOwners(ctx)
 	if err != nil || n > 0 {
 		return err
 	}
 	token := auth.Token("")[:24]
 	s.api.SetSetupToken(token)
-	s.log.Warn("no users yet: open the dashboard and create the owner with this setup token "+
+	s.log.Warn("no owner yet: open the dashboard and create the owner with this setup token "+
 		"(or run `pendolo users create --owner`)", "setupToken", token)
 	return nil
 }
