@@ -8,6 +8,7 @@ mkdir -p automations secrets
 cp pendolo.example.yaml pendolo.yaml        # then edit models and providers
 cp -r ../templates/site-checks automations/ # start from a template
 openssl rand -hex 24 > secrets/runner-token
+openssl rand -base64 32 > secrets/pendolo-master-key
 printf '%s' 'https://hooks.slack.com/services/...' > secrets/alerts-webhook
 docker compose up -d
 docker compose exec pendolo pendolo list
@@ -22,9 +23,35 @@ Compose starts two containers from the same image:
 
 A script that misbehaves can only reach what the runner can. If the runner is down, `/healthz` reports it and shell steps fail with "runner unreachable". The image includes `bash`, `curl`, `jq`, `openssl` and `ssh` for scripts, runs as a non-root user, and has a Docker health check. The database lives in the `pendolo-data` volume. `deploy/smoke-test.sh` checks the whole stack; CI runs it on every change.
 
+## The dashboard
+
+Open `http://localhost:8080`. The first time, the dashboard asks for the setup token printed in the server log (`docker compose logs pendolo | grep setupToken`) and creates the owner. Then:
+
+- **Overview**: health, automations, runs of the last 24 hours, cost this month, 14 days of runs, recent failures, upcoming runs.
+- **Automations**: state, triggers, last and next run; run now, pause, resume; the manifest as written.
+- **Runs**: every run, filterable; each run step by step with logs, inputs, outputs, errors, and every model call with prompt, answer, tokens and cost.
+- **Costs**: spending per day, per automation and per model.
+- **Secrets**, **Members**, **Audit**: per workspace, for the roles allowed.
+- **Users & workspaces**, **System**: for owners.
+- **Account**: password, two-factor authentication, API tokens.
+
+### Workspaces and roles
+
+An automation belongs to the workspace named in its `metadata.workspace` (`default` if empty); a workspace is created the first time an automation names it, or by an owner. People see only the workspaces they are members of; owners see all.
+
+| Role | Can |
+| --- | --- |
+| viewer | See automations, runs and costs |
+| approver | Same as viewer today; approves risky actions from phase 3 |
+| builder | Also run, pause and resume automations, and see secret names |
+| admin | Also manage secrets, members and read the audit log |
+| owner (instance) | Everything, in every workspace, plus users and workspaces |
+
+Every sign-in, change and secret read by an automation is recorded in the audit log. The API behind the dashboard is documented in [api.md](api.md); scripts use API tokens from the Account page.
+
 ## Webhooks from the internet
 
-Compose publishes port 8080 on localhost only. To receive webhooks from outside (GitHub, Stripe, a form), put a reverse proxy with TLS in front of it (Caddy, Traefik, nginx, Cloudflare Tunnel) and forward only `/hooks/`. Always give webhook triggers a `secret`.
+Compose publishes port 8080 on localhost only. To reach the dashboard or receive webhooks from outside, put a reverse proxy with TLS in front of it (Caddy, Traefik, nginx, Cloudflare Tunnel) and set `server.trustProxy: true`, so sign-in cookies are marked secure and the audit log records real addresses. To expose only webhooks, forward only `/hooks/`. Always give webhook triggers a `secret`.
 
 ## Without Docker
 

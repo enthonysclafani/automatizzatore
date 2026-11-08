@@ -4,8 +4,11 @@
 #   1. Put your automations in ./automations (one folder each).
 #   2. Copy pendolo.example.yaml to pendolo.yaml and set your models.
 #   3. Put secrets in ./secrets, one file per secret, and create the runner
-#      token:  openssl rand -hex 24 > secrets/runner-token
-#   4. docker compose up -d
+#      token and the master key that encrypts secrets saved in the dashboard:
+#        openssl rand -hex 24 > secrets/runner-token
+#        openssl rand -base64 32 > secrets/pendolo-master-key
+#   4. docker compose up -d, then open http://localhost:8080 and create the
+#      owner with the setup token printed in `docker compose logs pendolo`.
 services:
   pendolo:
     image: ${PENDOLO_IMAGE:-ghcr.io/enthonysclafani/pendolo:latest}
@@ -21,8 +24,8 @@ services:
       - ./pendolo.yaml:/etc/pendolo/pendolo.yaml:ro
       - ./secrets:/run/secrets:ro
     ports:
-      # Health and webhooks. Publish beyond localhost only behind a reverse
-      # proxy with TLS.
+      # Dashboard, API, health and webhooks. Publish beyond localhost only
+      # behind a reverse proxy with TLS (and set server.trustProxy).
       - "127.0.0.1:8080:8080"
     depends_on:
       - runner

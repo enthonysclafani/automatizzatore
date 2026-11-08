@@ -40,6 +40,14 @@ type Automation struct {
 	Manifest *manifest.Manifest
 }
 
+// Workspace returns the automation's workspace, "default" when unset.
+func (a Automation) Workspace() string {
+	if a.Manifest != nil && a.Manifest.Metadata.Workspace != "" {
+		return a.Manifest.Metadata.Workspace
+	}
+	return store.DefaultWorkspace
+}
+
 // Notifier is told about every finished run.
 type Notifier interface {
 	Notify(ctx context.Context, a Automation, run *store.Run)
@@ -54,8 +62,11 @@ type Engine struct {
 	Notifier Notifier
 	// Shell runs shell steps; nil runs them as local child processes.
 	Shell runner.Executor
-	Log   *slog.Logger
-	Now   func() time.Time
+	// SecretsFor returns the secrets a run may use; nil means Secrets for
+	// every run. It lets each workspace keep its own secrets.
+	SecretsFor func(a Automation, runID string) secrets.Provider
+	Log        *slog.Logger
+	Now        func() time.Time
 }
 
 // Outcome summarises a finished run.
@@ -118,7 +129,11 @@ func (e *Engine) Execute(ctx context.Context, run *store.Run, a Automation) Outc
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	ex := &execution{e: e, run: run, a: a, resolver: secrets.NewResolver(e.Secrets)}
+	provider := e.Secrets
+	if e.SecretsFor != nil {
+		provider = e.SecretsFor(a, run.ID)
+	}
+	ex := &execution{e: e, run: run, a: a, resolver: secrets.NewResolver(provider)}
 	if m.Budget != nil {
 		ex.maxCost = m.Budget.MaxCostEur
 	}

@@ -16,6 +16,7 @@ trap cleanup EXIT
 
 mkdir -p automations/hello secrets
 openssl rand -hex 24 > secrets/runner-token
+openssl rand -base64 32 > secrets/pendolo-master-key
 cat > pendolo.yaml <<'YAML'
 runner:
   url: http://runner:8090
@@ -55,4 +56,15 @@ if ! docker compose exec -T pendolo pendolo show --json "$run" | jq -r '.steps[0
   echo "the script did not run in the runner container ($runner_host)" >&2
   exit 1
 fi
-echo "smoke test passed: the run executed in the runner container"
+echo "the run executed in the runner container"
+
+# Dashboard and API: create an owner, sign in, read the run back.
+printf 'smoke-password-123\n' | docker compose exec -T pendolo pendolo users create --email smoke@example.com --owner
+curl -fsS http://127.0.0.1:8080/ | grep -q '<div id="root"' || { echo "dashboard not served" >&2; exit 1; }
+jar=$(mktemp)
+curl -fsS -c "$jar" -H 'Content-Type: application/json' -H 'X-Pendolo-Request: 1' \
+  -d '{"email":"smoke@example.com","password":"smoke-password-123"}' http://127.0.0.1:8080/api/v1/auth/login >/dev/null
+api_status=$(curl -fsS -b "$jar" "http://127.0.0.1:8080/api/v1/workspaces/default/runs/$run" | jq -r .run.status)
+rm -f "$jar"
+[ "$api_status" = succeeded ] || { echo "API returned status $api_status" >&2; exit 1; }
+echo "smoke test passed: runner, dashboard and API work"

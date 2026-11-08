@@ -82,7 +82,11 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	}
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level}))
 	// A run started by hand executes scripts here, in the foreground.
-	eng, err := server.NewEngine(cfg, st, log, false)
+	v, err := server.OpenVault(cfg, log)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	eng, err := server.NewEngine(cfg, st, v, log, false)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -90,7 +94,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	run, err := st.StartNow(ctx, store.NewRun{
-		Automation: a.Name, ManifestHash: a.Hash, TriggerType: "manual",
+		Automation: a.Name, Workspace: a.Workspace(), ManifestHash: a.Hash, TriggerType: "manual",
 		TriggerData: map[string]any{"by": "cli"},
 	}, "cli", time.Now())
 	if err != nil {
@@ -126,7 +130,7 @@ func cmdTrigger(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	id, _, err := st.Enqueue(context.Background(), store.NewRun{
-		Automation: a.Name, ManifestHash: a.Hash, TriggerType: "manual", TriggerData: map[string]any{"by": "cli"},
+		Automation: a.Name, Workspace: a.Workspace(), ManifestHash: a.Hash, TriggerType: "manual", TriggerData: map[string]any{"by": "cli"},
 	}, time.Now())
 	if err != nil {
 		return fail(stderr, err)

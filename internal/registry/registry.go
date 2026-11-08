@@ -12,16 +12,21 @@ import (
 	"path/filepath"
 	"sort"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/enthonysclafani/automatizzatore/internal/engine"
 	"github.com/enthonysclafani/automatizzatore/internal/manifest"
+	"github.com/enthonysclafani/automatizzatore/internal/store"
 )
 
 // Invalid is an automation folder that failed validation.
 type Invalid struct {
-	Name     string
-	Path     string
-	Hash     string
-	Problems []manifest.Problem
+	Name string
+	// Workspace is read leniently from the broken manifest, "default" if unreadable.
+	Workspace string
+	Path      string
+	Hash      string
+	Problems  []manifest.Problem
 }
 
 // Snapshot is the content of the automations folder at one moment.
@@ -92,13 +97,28 @@ func LoadFolder(folder string) (engine.Automation, *Invalid) {
 			Problems: []manifest.Problem{{Severity: manifest.SeverityError, Message: err.Error()}}}
 	}
 	if res.HasErrors() {
-		return engine.Automation{}, &Invalid{Name: filepath.Base(folder), Path: folder, Hash: hash, Problems: res.Problems}
+		return engine.Automation{}, &Invalid{Name: filepath.Base(folder), Workspace: guessWorkspace(path), Path: folder, Hash: hash, Problems: res.Problems}
 	}
 	abs, err := filepath.Abs(folder)
 	if err != nil {
 		abs = folder
 	}
 	return engine.Automation{Name: res.Manifest.Metadata.Name, Dir: abs, Hash: hash, Manifest: res.Manifest}, nil
+}
+
+// guessWorkspace reads metadata.workspace from a manifest that may be
+// invalid, so its problems show up in the right workspace.
+func guessWorkspace(path string) string {
+	var m struct {
+		Metadata struct {
+			Workspace string `yaml:"workspace"`
+		} `yaml:"metadata"`
+	}
+	b, err := os.ReadFile(path)
+	if err == nil && yaml.Unmarshal(b, &m) == nil && m.Metadata.Workspace != "" {
+		return m.Metadata.Workspace
+	}
+	return store.DefaultWorkspace
 }
 
 // hashFolder fingerprints every file of an automation, so an edited prompt

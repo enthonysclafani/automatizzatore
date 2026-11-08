@@ -194,3 +194,26 @@ func TestNewIDSortable(t *testing.T) {
 		t.Fatalf("ids not sortable: %s %s", a, b)
 	}
 }
+
+func TestListRunsPagination(t *testing.T) {
+	s, ctx := open(t), context.Background()
+	var ids []string
+	for i := 0; i < 5; i++ {
+		id, _, _ := s.Enqueue(ctx, NewRun{Automation: "a", Workspace: "w", TriggerType: "manual"}, t0) // same millisecond
+		ids = append(ids, id)
+		time.Sleep(time.Microsecond)
+	}
+	_, _, _ = s.Enqueue(ctx, NewRun{Automation: "b", Workspace: "other", TriggerType: "manual"}, t0)
+	page1, _ := s.ListRuns(ctx, RunFilter{Workspace: "w", Limit: 3})
+	page2, _ := s.ListRuns(ctx, RunFilter{Workspace: "w", Limit: 3, Before: page1[2].ID})
+	if len(page1) != 3 || len(page2) != 2 {
+		t.Fatalf("pages of %d and %d", len(page1), len(page2))
+	}
+	seen := map[string]bool{}
+	for _, r := range append(page1, page2...) {
+		if r.Workspace != "w" || seen[r.ID] {
+			t.Fatalf("run %+v repeated or from another workspace", r)
+		}
+		seen[r.ID] = true
+	}
+}

@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/enthonysclafani/automatizzatore/internal/api"
+	"github.com/enthonysclafani/automatizzatore/internal/auth"
 	"github.com/enthonysclafani/automatizzatore/internal/config"
 	"github.com/enthonysclafani/automatizzatore/internal/engine"
 	"github.com/enthonysclafani/automatizzatore/internal/llm"
@@ -27,6 +29,7 @@ import (
 	"github.com/enthonysclafani/automatizzatore/internal/scheduler"
 	"github.com/enthonysclafani/automatizzatore/internal/secrets"
 	"github.com/enthonysclafani/automatizzatore/internal/store"
+	"github.com/enthonysclafani/automatizzatore/internal/vault"
 )
 
 // Timings, exported so tests can shorten them.
@@ -51,6 +54,7 @@ type Server struct {
 	wake    chan struct{}
 
 	runner *runner.Remote
+	api    *api.API
 
 	mu      sync.RWMutex
 	snap    registry.Snapshot
@@ -66,14 +70,30 @@ func SecretsProvider(cfg config.Config) secrets.Provider {
 	return secrets.FilesAndEnv{Dir: cfg.Secrets.Dir, EnvPrefix: cfg.Secrets.EnvPrefix}
 }
 
+// OpenVault loads (or, the first time, generates) the master key.
+func OpenVault(cfg config.Config, log *slog.Logger) (*vault.Vault, error) {
+	key, source, err := vault.LoadKey(os.Getenv("PENDOLO_MASTER_KEY"), cfg.Secrets.MasterKeyFile, cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	if source == vault.FromGenerated && log != nil {
+		log.Warn("generated a new master key in the data folder; back it up separately from the database, "+
+			"or move it to PENDOLO_MASTER_KEY or secrets.masterKeyFile", "file", filepath.Join(cfg.DataDir, "master.key"))
+	}
+	return vault.New(key)
+}
+
 // NewEngine builds an engine over st from the configuration. With
 // useRunner, shell steps go to the configured runner, if any.
-func NewEngine(cfg config.Config, st *store.Store, log *slog.Logger, useRunner bool) (*engine.Engine, error) {
+func NewEngine(cfg config.Config, st *store.Store, v *vault.Vault, log *slog.Logger, useRunner bool) (*engine.Engine, error) {
 	sec := SecretsProvider(cfg)
 	httpClient := &http.Client{Timeout: 5 * time.Minute}
 	e := &engine.Engine{
 		Store: st, LLM: llm.New(cfg, sec), Secrets: sec, HTTP: httpClient, Log: log,
 		Notifier: &notify.Notifier{Secrets: sec, HTTP: httpClient, Log: log, Config: cfg.Notify},
+		SecretsFor: func(a engine.Automation, runID string) secrets.Provider {
+			return secrets.Workspace{Store: st, Vault: v, ID: a.Workspace(), Fallback: sec, Actor: "automation:" + a.Name, RunID: runID}
+		},
 	}
 	if useRunner && cfg.Runner.URL != "" {
 		r, err := remoteRunner(cfg, sec)
@@ -99,7 +119,12 @@ func New(cfg config.Config, log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	eng, err := NewEngine(cfg, st, log, true)
+	v, err := OpenVault(cfg, log)
+	if err != nil {
+		_ = st.Close()
+		return nil, err
+	}
+	eng, err := NewEngine(cfg, st, v, log, true)
 	if err != nil {
 		_ = st.Close()
 		return nil, err
@@ -108,6 +133,18 @@ func New(cfg config.Config, log *slog.Logger) (*Server, error) {
 		cfg: cfg, log: log, store: st, secrets: SecretsProvider(cfg),
 		engine: eng, owner: ownerID(), wake: make(chan struct{}, 1),
 	}
+	api.SecretsProvider = func() secrets.Provider { return s.secrets }
+	s.api = api.New(&api.API{
+		Store: st, Vault: v, Config: cfg, Log: log,
+		Snapshot: func() registry.Snapshot { s.mu.RLock(); defer s.mu.RUnlock(); return s.snap },
+		Health:   s.health,
+		Wake: func() {
+			select {
+			case s.wake <- struct{}{}:
+			default:
+			}
+		},
+	})
 	if r, ok := eng.Shell.(runner.Remote); ok {
 		s.runner = &r
 	}
@@ -146,6 +183,9 @@ func (s *Server) Run(ctx context.Context) error {
 		s.log.Warn("runs interrupted by the previous stop marked as failed", "count", n)
 	}
 	if err := s.reload(ctx); err != nil {
+		return err
+	}
+	if err := s.armSetup(ctx); err != nil {
 		return err
 	}
 
@@ -288,14 +328,14 @@ func (s *Server) reload(ctx context.Context) error {
 		if old, ok := prev[name]; !ok || old.Hash != a.Hash {
 			s.log.Info("automation loaded", "automation", name, "dir", a.Dir, "version", a.Hash)
 		}
-		if err := s.store.UpsertAutomation(ctx, store.Automation{Name: name, Path: a.Dir, Hash: a.Hash, Valid: true}, now); err != nil {
+		if err := s.store.UpsertAutomation(ctx, store.Automation{Name: name, Workspace: a.Workspace(), Path: a.Dir, Hash: a.Hash, Valid: true}, now); err != nil {
 			return err
 		}
 	}
 	for _, inv := range snap.Invalid {
 		problems, _ := json.Marshal(inv.Problems)
 		s.log.Warn("automation invalid, not scheduled", "automation", inv.Name, "dir", inv.Path, "problems", string(problems))
-		if err := s.store.UpsertAutomation(ctx, store.Automation{Name: inv.Name, Path: inv.Path, Hash: inv.Hash, Problems: problems}, now); err != nil {
+		if err := s.store.UpsertAutomation(ctx, store.Automation{Name: inv.Name, Workspace: inv.Workspace, Path: inv.Path, Hash: inv.Hash, Problems: problems}, now); err != nil {
 			return err
 		}
 	}
@@ -316,7 +356,24 @@ func (s *Server) recover(ctx context.Context) {
 	}
 }
 
+// armSetup prints a one-time setup token while no user exists, so only
+// someone who can read the server log can create the first owner.
+func (s *Server) armSetup(ctx context.Context) error {
+	n, err := s.store.CountUsers(ctx)
+	if err != nil || n > 0 {
+		return err
+	}
+	token := auth.Token("")[:24]
+	s.api.SetSetupToken(token)
+	s.log.Warn("no users yet: open the dashboard and create the owner with this setup token "+
+		"(or run `pendolo users create --owner`)", "setupToken", token)
+	return nil
+}
+
 func (s *Server) prune(ctx context.Context) {
+	if err := s.store.DeleteExpiredSessions(ctx, time.Now()); err != nil {
+		s.log.Error("prune sessions", "err", err)
+	}
 	keep := s.cfg.Retention.Runs.Std()
 	if keep <= 0 {
 		return

@@ -7,7 +7,11 @@ Pendolo reads `pendolo.yaml` (or the file in `$PENDOLO_CONFIG`, or `--config`). 
 | `dataDir` | `data` | Folder of the SQLite database (`pendolo.db`). Back it up. |
 | `automationsDir` | `automations` | One sub-folder per automation, each with an `automation.yaml`. |
 | `workers` | `4` | Runs executed at the same time. Runs of the same automation never overlap. |
-| `server.listen` | `:8080` | Address of `/healthz` and of webhook triggers (`/hooks/<name>`). |
+| `server.listen` | `:8080` | Address of the dashboard, the API (`/api/v1`), `/healthz` and webhook triggers (`/hooks/<name>`). |
+| `server.trustProxy` | `false` | Read the client address and `https` from `X-Forwarded-For` and `X-Forwarded-Proto`. Turn on only behind a reverse proxy. |
+| `auth.sessionTTL` | `336h` (14 days) | How long a browser stays signed in without activity. |
+| `auth.oidc` | off | Single sign-on; see below. |
+| `secrets.masterKeyFile` | `/run/secrets/pendolo-master-key` | Base64 key that encrypts the secrets saved in the dashboard. |
 | `runner.url` | none | A `pendolo runner` that executes shell steps; without it, scripts run inside the server. |
 | `runner.token` | none | Token shared with the runner, usually `secret://runner-token`. |
 | `notify.slack.token` | none | Slack bot token for `slack:` channels. |
@@ -28,6 +32,34 @@ Environment variables override the file: `PENDOLO_DATA_DIR`, `PENDOLO_AUTOMATION
 A manifest refers to a secret as `secret://<name>`. Pendolo looks for a file `<secrets.dir>/<name>`, then for the variable `<envPrefix><NAME>`, where the name is upper-cased and `-` and `.` become `_`. So `secret://server-ssh-key` is read from `/run/secrets/server-ssh-key` or `PENDOLO_SECRET_SERVER_SSH_KEY`.
 
 Secret values are injected only where a step uses them (HTTP URLs, headers and bodies; shell `env`), never into a model's prompt, and they are masked as `[secret:<name>]` in every stored output, log and error. Shell steps get a minimal environment: they never see Pendolo's own variables. Encrypted storage and 1Password arrive in phase 2.
+
+## The master key
+
+Secrets saved in the dashboard and two-factor seeds are encrypted with AES-256-GCM under a 32-byte master key. Pendolo reads it from `PENDOLO_MASTER_KEY`, then from `secrets.masterKeyFile`. With neither, it generates `<dataDir>/master.key` on first start and logs a warning. Create one yourself with `pendolo keygen` or `openssl rand -base64 32`, and keep it apart from database backups: whoever has both can read every secret. Losing it makes the stored secrets unreadable (set them again).
+
+When an automation asks for `secret://name`, Pendolo looks first in the dashboard secrets of the automation's workspace, then in the files and environment variables above. Workspaces never see each other's dashboard secrets; file and environment secrets are shared by the whole instance.
+
+## Sign-in and single sign-on
+
+While no user exists, the server logs a one-time **setup token**. Open the dashboard and create the first owner with it, or run `pendolo users create --email you@example.com --owner` on the server. Owners then create users and add them to workspaces with a role.
+
+Passwords are hashed with Argon2id and need at least 12 characters. Users can turn on two-factor authentication (TOTP, any authenticator app) in their Account page. Sign-in is rate limited per address and per email. `pendolo users password --email ...` resets a password and turns two-factor off, for a locked-out user.
+
+Any OpenID Connect provider works for single sign-on: Google Workspace, Microsoft Entra ID, Clerk, Authentik, Keycloak, Zitadel, Okta.
+
+```yaml
+auth:
+  oidc:
+    issuer: https://accounts.google.com
+    clientID: 1234.apps.googleusercontent.com
+    clientSecret: secret://oidc-client-secret
+    redirectURL: https://pendolo.example.com/api/v1/auth/oidc/callback
+    label: Google                # the button says "Sign in with Google"
+    autoCreate: true             # create unknown users from these domains...
+    allowedDomains: [example.com]
+```
+
+Users are matched by email. A user created by single sign-on starts without workspaces until an owner or a workspace admin adds them; with `autoCreate: false`, only users an owner created can sign in.
 
 ## The runner
 

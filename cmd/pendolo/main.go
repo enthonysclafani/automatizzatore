@@ -40,6 +40,8 @@ Usage:
   pendolo validate [--format text|json] [--strict] <path>...
                                      Check manifests; a folder is searched for automation.yaml.
   pendolo schema                     Print the JSON Schema of the manifest format.
+  pendolo users list|create|password Manage dashboard users (create the first owner here or in the dashboard).
+  pendolo keygen                     Print a new master key for PENDOLO_MASTER_KEY.
   pendolo healthcheck [--url u]      Exit 0 if the server is healthy (for Docker).
   pendolo version                    Print version information.
 
@@ -73,6 +75,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdShow(args[1:], stdout, stderr)
 	case "pause", "resume":
 		return cmdPause(args[0] == "pause", args[1:], stdout, stderr)
+	case "users":
+		return cmdUsers(args[1:], stdout, stderr)
+	case "keygen":
+		return cmdKeygen(args[1:], stdout, stderr)
 	case "healthcheck":
 		return cmdHealthcheck(args[1:], stdout, stderr)
 	case "validate":

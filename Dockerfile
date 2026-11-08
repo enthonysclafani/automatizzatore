@@ -1,11 +1,20 @@
 # syntax=docker/dockerfile:1
 
+# The dashboard: built once, embedded in the binary.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
+
 # Build on the runner's own platform and cross-compile: no emulation needed.
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+COPY --from=web /src/internal/webui/dist ./internal/webui/dist
 ARG TARGETOS TARGETARCH
 ARG VERSION=dev COMMIT=none DATE=unknown
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \

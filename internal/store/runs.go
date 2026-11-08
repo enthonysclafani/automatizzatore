@@ -12,6 +12,7 @@ import (
 type Run struct {
 	ID           string          `json:"id"`
 	Automation   string          `json:"automation"`
+	Workspace    string          `json:"workspace"`
 	ManifestHash string          `json:"manifestHash"`
 	TriggerType  string          `json:"triggerType"`
 	TriggerKey   string          `json:"triggerKey,omitempty"`
@@ -29,7 +30,9 @@ type Run struct {
 
 // NewRun describes a run to enqueue.
 type NewRun struct {
-	Automation   string
+	Automation string
+	// Workspace defaults to "default".
+	Workspace    string
 	ManifestHash string
 	TriggerType  string
 	TriggerKey   string
@@ -37,7 +40,7 @@ type NewRun struct {
 	TriggerData  any
 }
 
-const runColumns = `id, automation, manifest_hash, trigger_type, trigger_key, scheduled_for, trigger_data,
+const runColumns = `id, automation, workspace, manifest_hash, trigger_type, trigger_key, scheduled_for, trigger_data,
 	status, error, anomalies, queued_at, started_at, finished_at, cost_eur, worker`
 
 func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
@@ -46,7 +49,7 @@ func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
 		scheduled, started, finish sql.NullString
 		queued, data               string
 	)
-	err := row.Scan(&r.ID, &r.Automation, &r.ManifestHash, &r.TriggerType, &r.TriggerKey, &scheduled, &data,
+	err := row.Scan(&r.ID, &r.Automation, &r.Workspace, &r.ManifestHash, &r.TriggerType, &r.TriggerKey, &scheduled, &data,
 		&r.Status, &r.Error, &r.Anomalies, &queued, &started, &finish, &r.CostEur, &r.Worker)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -67,9 +70,9 @@ func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
 func (s *Store) Enqueue(ctx context.Context, n NewRun, now time.Time) (id string, inserted bool, err error) {
 	id = NewID(now)
 	res, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO runs
-		(id, automation, manifest_hash, trigger_type, trigger_key, scheduled_for, trigger_data, status, queued_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, n.Automation, n.ManifestHash, n.TriggerType, n.TriggerKey, tsPtr(n.ScheduledFor), toJSON(n.TriggerData), RunQueued, ts(now))
+		(id, automation, workspace, manifest_hash, trigger_type, trigger_key, scheduled_for, trigger_data, status, queued_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, n.Automation, workspaceOr(n.Workspace), n.ManifestHash, n.TriggerType, n.TriggerKey, tsPtr(n.ScheduledFor), toJSON(n.TriggerData), RunQueued, ts(now))
 	if err != nil {
 		return "", false, err
 	}
@@ -85,9 +88,9 @@ func (s *Store) Enqueue(ctx context.Context, n NewRun, now time.Time) (id string
 func (s *Store) StartNow(ctx context.Context, n NewRun, worker string, now time.Time) (*Run, error) {
 	id := NewID(now)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO runs
-		(id, automation, manifest_hash, trigger_type, trigger_key, scheduled_for, trigger_data, status, queued_at, started_at, worker)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, n.Automation, n.ManifestHash, n.TriggerType, n.TriggerKey, tsPtr(n.ScheduledFor), toJSON(n.TriggerData),
+		(id, automation, workspace, manifest_hash, trigger_type, trigger_key, scheduled_for, trigger_data, status, queued_at, started_at, worker)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, n.Automation, workspaceOr(n.Workspace), n.ManifestHash, n.TriggerType, n.TriggerKey, tsPtr(n.ScheduledFor), toJSON(n.TriggerData),
 		RunRunning, ts(now), ts(now), worker)
 	if err != nil {
 		return nil, err
@@ -150,9 +153,19 @@ func (s *Store) GetRun(ctx context.Context, id string) (*Run, error) {
 
 // RunFilter selects runs to list.
 type RunFilter struct {
+	Workspace  string
 	Automation string
 	Status     string
-	Limit      int
+	// Before returns the runs listed after this run id (the next page).
+	Before string
+	Limit  int
+}
+
+func workspaceOr(ws string) string {
+	if ws == "" {
+		return DefaultWorkspace
+	}
+	return ws
 }
 
 // ListRuns returns runs, newest first.
@@ -161,9 +174,10 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]Run, error) {
 		f.Limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT `+runColumns+` FROM runs
-		WHERE (? = '' OR automation = ?) AND (? = '' OR status = ?)
+		WHERE (? = '' OR workspace = ?) AND (? = '' OR automation = ?) AND (? = '' OR status = ?)
+		  AND (? = '' OR (queued_at, id) < (SELECT queued_at, id FROM runs WHERE id = ?))
 		ORDER BY queued_at DESC, id DESC LIMIT ?`,
-		f.Automation, f.Automation, f.Status, f.Status, f.Limit)
+		f.Workspace, f.Workspace, f.Automation, f.Automation, f.Status, f.Status, f.Before, f.Before, f.Limit)
 	if err != nil {
 		return nil, err
 	}

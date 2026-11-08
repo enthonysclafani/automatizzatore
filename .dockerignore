@@ -2,3 +2,5 @@
 .github
 bin
 dist
+web/node_modules
+internal/webui/dist

@@ -83,7 +83,7 @@ func (s *Server) handleHook(w http.ResponseWriter, r *http.Request) {
 		data["json"] = parsed
 	}
 	id, _, err := s.store.Enqueue(r.Context(), store.NewRun{
-		Automation: name, ManifestHash: a.Hash, TriggerType: "webhook", TriggerData: data,
+		Automation: name, Workspace: a.Workspace(), ManifestHash: a.Hash, TriggerType: "webhook", TriggerData: data,
 	}, time.Now())
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)

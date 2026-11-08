@@ -9,7 +9,9 @@ Pendolo is a self-hosted automation engine. You describe what you want in plain 
 - **Runs anywhere.** One binary and one container image for Linux, macOS and Windows, on amd64 and arm64.
 - **Transparent.** Every run, step, model call, cost and approval is recorded.
 
-**Status: phase 1 complete.** The engine runs: schedules and webhook triggers, a run queue, `http`, `shell`, `llm` and `foreach` steps, any model provider, secrets, scripts isolated in a separate runner container, notifications by webhook, Slack, Telegram and email, and full run history in SQLite, driven from the command line. The dashboard and the connectors come next; see the [roadmap](#roadmap).
+**Status: phase 2 complete.** A dashboard with sign-in (passwords, two-factor, single sign-on), workspaces with roles, encrypted secrets, an audit log, run timelines and costs, on top of the phase 1 engine.
+
+The engine runs schedules and webhook triggers through a run queue, with `http`, `shell`, `llm` and `foreach` steps, any model provider, secrets, scripts isolated in a separate runner container, notifications by webhook, Slack, Telegram and email, and full run history in SQLite. The connectors come next; see the [roadmap](#roadmap).
 
 ## Try it
 
@@ -62,12 +64,15 @@ The full format is in [docs/manifest.md](docs/manifest.md), the server settings 
 | `pendolo pause <name>` / `resume <name>` | Stops or restarts scheduling. |
 | `pendolo validate [--strict] <path>...` | Checks manifests. |
 | `pendolo schema` | Prints the JSON Schema of the manifest format. |
+| `pendolo users list` / `create` / `password` | Manages dashboard users. |
+| `pendolo keygen` | Prints a new master key. |
 | `pendolo healthcheck` | Exits 0 when the server is healthy. |
 
 ## Development
 
 ```bash
 make check   # tests, lint, shellcheck, template validation
+make web     # the dashboard (Node 22), embedded by the next build
 make build   # bin/pendolo
 make docker  # container image
 ```
@@ -87,6 +92,11 @@ internal/secrets/     secret:// references and redaction
 internal/registry/    loads the automations folder
 internal/notify/      run notifications
 internal/server/      wires it all into a long-running process
+internal/api/         the dashboard's JSON API: sign-in, roles, workspaces
+internal/auth/        passwords, two-factor codes, tokens, rate limits
+internal/vault/       encryption with the master key
+internal/webui/       the built dashboard, embedded in the binary
+web/                  the dashboard (React, TypeScript, Vite)
 internal/config/      pendolo.yaml
 spec/                 JSON Schema of the manifest (source of truth)
 templates/            ready-made automations
@@ -99,8 +109,8 @@ docs/                 documentation
 | Phase | Scope | Done when |
 | --- | --- | --- |
 | 0. Foundations (done) | Repo, CI, manifest schema, validator | A YAML manifest is validated from the CLI |
-| 1. Engine (done, 7-day trial pending) | Scheduler, queue, http/shell/llm steps, SQLite, `pendolo run` | Site checks run for 7 days without stopping |
-| 2. Dashboard | Login, OIDC, roles, workspaces, encrypted secrets, run timeline, costs | A viewer sees only their own workspace |
+| 1. Engine (done) | Scheduler, queue, http/shell/llm steps, SQLite, `pendolo run` | Site checks run for 7 days without stopping |
+| 2. Dashboard (done) | Login, OIDC, roles, workspaces, encrypted secrets, run timeline, costs | A viewer sees only their own workspace |
 | 3. Connectors | Gmail with a setup wizard, Slack, Google Docs, MCP, agent and approval steps | Email triage and editorial plan run end to end |
 | 4. Builder and v0.1 | Plain language to manifest, templates, multi-arch image, security review | A sentence becomes an active automation |
 

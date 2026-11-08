@@ -178,7 +178,7 @@ func (s *Scheduler) tickAutomation(ctx context.Context, name string, a engine.Au
 			for _, occ := range pick(due, tr.Schedule.Misfire, now) {
 				at := occ
 				_, inserted, err := s.Store.Enqueue(ctx, store.NewRun{
-					Automation: name, ManifestHash: a.Hash, TriggerType: "schedule", TriggerKey: key, ScheduledFor: &at,
+					Automation: name, Workspace: a.Workspace(), ManifestHash: a.Hash, TriggerType: "schedule", TriggerKey: key, ScheduledFor: &at,
 					TriggerData: map[string]any{
 						"cron": tr.Schedule.Cron, "timezone": tr.Schedule.Timezone,
 						"lateSeconds": int(now.Sub(occ).Seconds()),

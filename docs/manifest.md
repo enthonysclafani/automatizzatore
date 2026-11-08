@@ -23,7 +23,7 @@ pendolo validate path/to/automation.yaml
 | `kind` | yes | Always `Automation`. |
 | `metadata.name` | yes | Lowercase letters, digits and hyphens. Unique within a workspace. |
 | `metadata.description` | no | One or two sentences for people. |
-| `metadata.workspace` | no | The workspace (client or project) it belongs to. |
+| `metadata.workspace` | no | The workspace (client or project) it belongs to; `default` when empty. It decides who sees the automation in the dashboard and which dashboard secrets it can use. |
 | `metadata.labels` | no | Free key/value labels. |
 | `triggers` | yes | At least one trigger. |
 | `autonomy` | no | `observe`, `draft`, `ask` (default) or `auto`. |

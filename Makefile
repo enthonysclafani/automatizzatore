@@ -4,11 +4,14 @@ DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 PKG     := github.com/enthonysclafani/automatizzatore/internal/version
 LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE)
 
-.PHONY: all build test lint validate-templates check docker clean
+.PHONY: all web build test lint validate-templates check docker clean
 
-all: check build
+all: check web build
 
-build: ## Build bin/pendolo
+web: ## Build the dashboard into internal/webui/dist (needs Node 22)
+	cd web && npm ci --no-audit --no-fund && npm run build
+
+build: ## Build bin/pendolo (run `make web` first to include the dashboard)
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/pendolo ./cmd/pendolo
 
 test: ## Run tests with the race detector
@@ -28,3 +31,4 @@ docker: ## Build the container image
 
 clean:
 	rm -rf bin dist
+	find internal/webui/dist -mindepth 1 ! -name .gitkeep -delete

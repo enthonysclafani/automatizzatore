@@ -27,6 +27,7 @@ type Config struct {
 
 	Server    Server              `yaml:"server"`
 	Runner    Runner              `yaml:"runner"`
+	Auth      Auth                `yaml:"auth"`
 	Notify    Notify              `yaml:"notify"`
 	Heartbeat Heartbeat           `yaml:"heartbeat"`
 	Secrets   Secrets             `yaml:"secrets"`
@@ -38,7 +39,36 @@ type Config struct {
 // Server configures the HTTP listener (health and, later, the API).
 type Server struct {
 	Listen string `yaml:"listen"`
+	// TrustProxy reads the client address and scheme from X-Forwarded-For
+	// and X-Forwarded-Proto. Enable it only behind a reverse proxy.
+	TrustProxy bool `yaml:"trustProxy"`
 }
+
+// Auth configures dashboard sign-in.
+type Auth struct {
+	// SessionTTL is how long a browser stays signed in without activity.
+	SessionTTL Duration `yaml:"sessionTTL"`
+	OIDC       OIDC     `yaml:"oidc"`
+}
+
+// OIDC enables single sign-on with any OpenID Connect provider (Google,
+// Microsoft Entra, Clerk, Authentik, Keycloak, Zitadel...).
+type OIDC struct {
+	Issuer       string `yaml:"issuer"`
+	ClientID     string `yaml:"clientID"`
+	ClientSecret string `yaml:"clientSecret"`
+	// RedirectURL is https://<your host>/api/v1/auth/oidc/callback.
+	RedirectURL string `yaml:"redirectURL"`
+	// Label is shown on the button: "Sign in with <label>".
+	Label string `yaml:"label"`
+	// AutoCreate creates unknown users whose email domain is in
+	// AllowedDomains; they start without workspaces.
+	AutoCreate     bool     `yaml:"autoCreate"`
+	AllowedDomains []string `yaml:"allowedDomains"`
+}
+
+// Enabled reports whether OIDC is configured.
+func (o OIDC) Enabled() bool { return o.Issuer != "" && o.ClientID != "" }
 
 // Runner points shell steps at a separate `pendolo runner` process. Without
 // a URL, scripts run as child processes of the server.
@@ -85,6 +115,10 @@ type Heartbeat struct {
 
 // Secrets says where secret:// references are read from.
 type Secrets struct {
+	// MasterKeyFile holds the base64 key that encrypts secrets stored in the
+	// dashboard. Without it (and without PENDOLO_MASTER_KEY) a key is
+	// generated in dataDir/master.key.
+	MasterKeyFile string `yaml:"masterKeyFile"`
 	// Dir holds one file per secret, named after it (Docker secrets layout).
 	Dir string `yaml:"dir"`
 	// EnvPrefix: secret://server-ssh-key is read from PENDOLO_SECRET_SERVER_SSH_KEY.
@@ -151,7 +185,8 @@ func Defaults() Config {
 		Workers:        4,
 		Server:         Server{Listen: ":8080"},
 		Heartbeat:      Heartbeat{Interval: Duration(5 * time.Minute)},
-		Secrets:        Secrets{Dir: "/run/secrets", EnvPrefix: "PENDOLO_SECRET_"},
+		Secrets:        Secrets{Dir: "/run/secrets", EnvPrefix: "PENDOLO_SECRET_", MasterKeyFile: "/run/secrets/pendolo-master-key"},
+		Auth:           Auth{SessionTTL: Duration(14 * 24 * time.Hour)},
 		Retention:      Retention{Runs: Duration(90 * 24 * time.Hour)},
 	}
 }
@@ -220,6 +255,12 @@ func (c Config) Validate() error {
 		if m.Model == "" {
 			errs = append(errs, fmt.Errorf("model %q: model is empty", alias))
 		}
+	}
+	if o := c.Auth.OIDC; (o.Issuer != "") != (o.ClientID != "") || (o.Enabled() && o.RedirectURL == "") {
+		errs = append(errs, errors.New("auth.oidc needs issuer, clientID and redirectURL together"))
+	}
+	if c.Auth.SessionTTL.Std() < 5*time.Minute {
+		errs = append(errs, errors.New("auth.sessionTTL must be at least 5m"))
 	}
 	if c.Runner.URL != "" && c.Runner.Token == "" {
 		errs = append(errs, errors.New("runner.token is required when runner.url is set"))

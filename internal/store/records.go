@@ -138,13 +138,14 @@ func (s *Store) ListLLMCalls(ctx context.Context, runID string) ([]LLMCall, erro
 
 // Automation is the stored state of an automation folder.
 type Automation struct {
-	Name     string          `json:"name"`
-	Path     string          `json:"path"`
-	Hash     string          `json:"hash"`
-	Valid    bool            `json:"valid"`
-	Problems json.RawMessage `json:"problems"`
-	Enabled  bool            `json:"enabled"`
-	LoadedAt time.Time       `json:"loadedAt"`
+	Name      string          `json:"name"`
+	Workspace string          `json:"workspace"`
+	Path      string          `json:"path"`
+	Hash      string          `json:"hash"`
+	Valid     bool            `json:"valid"`
+	Problems  json.RawMessage `json:"problems"`
+	Enabled   bool            `json:"enabled"`
+	LoadedAt  time.Time       `json:"loadedAt"`
 }
 
 // UpsertAutomation records an automation found on disk. It keeps the
@@ -154,11 +155,15 @@ func (s *Store) UpsertAutomation(ctx context.Context, a Automation, now time.Tim
 	if len(problems) == 0 {
 		problems = json.RawMessage("[]")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO automations (name, path, hash, valid, problems, loaded_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT (name) DO UPDATE SET path = excluded.path, hash = excluded.hash, valid = excluded.valid,
-			problems = excluded.problems, loaded_at = excluded.loaded_at`,
-		a.Name, a.Path, a.Hash, boolInt(a.Valid), string(problems), ts(now))
+	ws := workspaceOr(a.Workspace)
+	if err := s.EnsureWorkspace(ctx, ws, now); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO automations (name, workspace, path, hash, valid, problems, loaded_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (name) DO UPDATE SET workspace = excluded.workspace, path = excluded.path, hash = excluded.hash,
+			valid = excluded.valid, problems = excluded.problems, loaded_at = excluded.loaded_at`,
+		a.Name, ws, a.Path, a.Hash, boolInt(a.Valid), string(problems), ts(now))
 	return err
 }
 
@@ -202,7 +207,7 @@ func (s *Store) DeleteAutomationsExcept(ctx context.Context, keep []string) erro
 
 // ListAutomations returns every known automation.
 func (s *Store) ListAutomations(ctx context.Context) ([]Automation, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, path, hash, valid, problems, enabled, loaded_at FROM automations ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT name, workspace, path, hash, valid, problems, enabled, loaded_at FROM automations ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +219,7 @@ func (s *Store) ListAutomations(ctx context.Context) ([]Automation, error) {
 			valid, enabled int
 			problems, at   string
 		)
-		if err := rows.Scan(&a.Name, &a.Path, &a.Hash, &valid, &problems, &enabled, &at); err != nil {
+		if err := rows.Scan(&a.Name, &a.Workspace, &a.Path, &a.Hash, &valid, &problems, &enabled, &at); err != nil {
 			return nil, err
 		}
 		a.Valid, a.Enabled = valid == 1, enabled == 1
