@@ -96,3 +96,50 @@ func TestVersionCommand(t *testing.T) {
 		t.Fatalf("exit %d, output %q", code, out)
 	}
 }
+
+func TestRunRunsShowAndPause(t *testing.T) {
+	data := t.TempDir()
+	autos := t.TempDir()
+	t.Setenv("PENDOLO_DATA_DIR", data)
+	t.Setenv("PENDOLO_AUTOMATIONS_DIR", autos)
+	dir := filepath.Join(autos, "hello")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := "apiVersion: pendolo/v1\nkind: Automation\nmetadata: { name: hello }\ntriggers: [ { manual: {} } ]\n" +
+		"steps:\n  - id: greet\n    type: shell\n    run: echo \"hello $WHO\"\n    env: { WHO: \"${automation.name}\" }\n"
+	if err := os.WriteFile(filepath.Join(dir, "automation.yaml"), []byte(m), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errOut := runCLI("run", "hello")
+	if code != exitOK || !strings.Contains(out, "SUCCEEDED") || !strings.Contains(out, "hello hello") {
+		t.Fatalf("run by name: exit %d\n%s\n%s", code, out, errOut)
+	}
+	if code, out, _ := runCLI("run", dir); code != exitOK || !strings.Contains(out, "ok   greet") {
+		t.Fatalf("run by folder: exit %d\n%s", code, out)
+	}
+
+	code, out, _ = runCLI("runs", "--json")
+	var runs []map[string]any
+	if err := json.Unmarshal([]byte(out), &runs); err != nil || code != exitOK || len(runs) != 2 {
+		t.Fatalf("runs: exit %d err %v\n%s", code, err, out)
+	}
+	id, _ := runs[0]["id"].(string)
+	if code, out, _ := runCLI("show", id); code != exitOK || !strings.Contains(out, "greet") {
+		t.Fatalf("show: exit %d\n%s", code, out)
+	}
+	if code, _, _ := runCLI("show", "nope"); code != exitInvalid {
+		t.Fatalf("show of a missing run: exit %d", code)
+	}
+	if code, out, _ := runCLI("trigger", "hello"); code != exitOK || !strings.Contains(out, "queued run") {
+		t.Fatalf("trigger: exit %d\n%s", code, out)
+	}
+	// pause needs the automation recorded by a server; without it the error says so.
+	if code, _, errOut := runCLI("pause", "hello"); code != exitInvalid || !strings.Contains(errOut, "server") {
+		t.Fatalf("pause before any server: exit %d %s", code, errOut)
+	}
+	if code, _, errOut := runCLI("run", "missing"); code != exitInvalid || !strings.Contains(errOut, "no automation named") {
+		t.Fatalf("run of a missing automation: exit %d %s", code, errOut)
+	}
+}

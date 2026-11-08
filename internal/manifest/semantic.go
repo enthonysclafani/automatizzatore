@@ -11,6 +11,8 @@ import (
 	"time"
 	_ "time/tzdata" // time zones work even on images without a tz database
 
+	"github.com/expr-lang/expr/ast"
+	"github.com/expr-lang/expr/parser"
 	"github.com/robfig/cron/v3"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -20,10 +22,6 @@ import (
 var (
 	exprRe      = regexp.MustCompile(`\$\{([^{}]*)\}`)
 	wholeExprRe = regexp.MustCompile(`^\s*\$\{[^{}]*\}\s*$`)
-	stepRefRe   = regexp.MustCompile(`(?:^|[^\w.])steps\.([a-zA-Z_][a-zA-Z0-9_]*)`)
-	bareStepsRe = regexp.MustCompile(`(?:^|[^\w.])steps(?:$|[^\w.])`)
-	loopVarRe   = regexp.MustCompile(`(?:^|[^\w.])(item|index)\b`)
-	rootRe      = regexp.MustCompile(`^\s*!?\s*\(?\s*([a-zA-Z_][a-zA-Z0-9_]*)`)
 )
 
 // exprRoots are the names an expression may start from.
@@ -134,6 +132,10 @@ func (v *semantic) checkSteps(steps []any, ptr string, visible map[string]bool, 
 			}
 		}
 
+		if run, ok := sm["run"].(string); ok && sm["type"] == StepShell {
+			v.checkShellRun(run, sp+"/run")
+		}
+
 		for _, str := range stringsIn(sm, sp, true) {
 			v.checkExpressions(str.value, str.ptr, id, local, foreach)
 		}
@@ -161,20 +163,93 @@ func (v *semantic) checkExpressions(s, ptr, self string, visible map[string]bool
 			v.add(SeverityError, ptr, "empty expression ${}")
 			continue
 		}
-		if r := rootRe.FindStringSubmatch(body); r == nil || !exprRoots[r[1]] {
-			v.add(SeverityError, ptr, "expression ${%s} must start with one of: %s", body, rootList())
+		names, refs, bareSteps, err := analyzeExpr(body)
+		if err != nil {
+			v.add(SeverityError, ptr, "invalid expression ${%s}: %s", body, firstLine(err.Error()))
 			continue
 		}
-		if bareStepsRe.MatchString(body) && !stepRefRe.MatchString(body) {
+		for _, n := range names {
+			if !exprRoots[n] {
+				v.add(SeverityError, ptr, "expression ${%s} uses unknown name %q; names start from one of: %s", body, n, rootList())
+			}
+			if (n == "item" || n == "index") && foreach == "" {
+				v.add(SeverityError, ptr, "${%s} uses %q, which exists only inside a foreach step", body, n)
+			}
+		}
+		if bareSteps {
 			v.add(SeverityError, ptr, "expression ${%s} must name a step, as in steps.<id>.output", body)
 		}
-		for _, ref := range stepRefRe.FindAllStringSubmatch(body, -1) {
-			v.checkStepRef(ref[1], ptr, self, visible, foreach)
-		}
-		if lv := loopVarRe.FindStringSubmatch(body); lv != nil && foreach == "" {
-			v.add(SeverityError, ptr, "${%s} uses %q, which exists only inside a foreach step", body, lv[1])
+		for _, ref := range refs {
+			v.checkStepRef(ref, ptr, self, visible, foreach)
 		}
 	}
+}
+
+// shellVarRe matches the name at the start of a ${...} in shell code.
+var shellVarRe = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)(.?)`)
+
+// checkShellRun rejects Pendolo expressions in shell code: values pasted
+// into a script can break it or inject commands. Shell variables such as
+// ${HOME} or ${N:-1} are left alone.
+func (v *semantic) checkShellRun(run, ptr string) {
+	for _, m := range exprRe.FindAllStringSubmatch(run, -1) {
+		sm := shellVarRe.FindStringSubmatch(m[1])
+		if sm == nil || !exprRoots[sm[1]] || sm[2] == ":" || sm[2] == "-" || sm[2] == "#" || sm[2] == "%" {
+			continue
+		}
+		v.add(SeverityError, ptr, "${%s} is not evaluated in run, which is shell code; pass the value through env (e.g. env: { VALUE: \"${%s}\" }) and use $VALUE in the script",
+			strings.TrimSpace(m[1]), strings.TrimSpace(m[1]))
+	}
+}
+
+// analyzeExpr parses an expression and returns the variable names it
+// uses, the step ids it reads through steps.<id>, and whether it uses
+// "steps" without naming a step.
+func analyzeExpr(body string) (names, stepRefs []string, bareSteps bool, err error) {
+	tree, err := parser.Parse(body)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	c := &exprCollector{stepBases: map[*ast.IdentifierNode]bool{}, seen: map[string]bool{}}
+	ast.Walk(&tree.Node, c)
+	for _, id := range c.idents {
+		if !c.seen[id.Value] {
+			c.seen[id.Value] = true
+			names = append(names, id.Value)
+		}
+		if id.Value == "steps" && !c.stepBases[id] {
+			bareSteps = true
+		}
+	}
+	return names, c.refs, bareSteps, nil
+}
+
+type exprCollector struct {
+	idents    []*ast.IdentifierNode
+	stepBases map[*ast.IdentifierNode]bool
+	refs      []string
+	seen      map[string]bool
+}
+
+func (c *exprCollector) Visit(node *ast.Node) {
+	switch n := (*node).(type) {
+	case *ast.IdentifierNode:
+		c.idents = append(c.idents, n)
+	case *ast.MemberNode:
+		if base, ok := n.Node.(*ast.IdentifierNode); ok && base.Value == "steps" {
+			if prop, ok := n.Property.(*ast.StringNode); ok {
+				c.stepBases[base] = true
+				c.refs = append(c.refs, prop.Value)
+			}
+		}
+	}
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func (v *semantic) checkStepRef(id, ptr, self string, visible map[string]bool, foreach string) {
@@ -252,7 +327,8 @@ func stringsIn(v any, ptr string, stepTop bool) []located {
 	case map[string]any:
 		keys := make([]string, 0, len(t))
 		for k := range t {
-			if stepTop && (k == "steps" || k == "outputSchema") {
+			// run is shell code: ${VAR} there is the shell's, see checkShellRun.
+			if stepTop && (k == "steps" || k == "outputSchema" || k == "run") {
 				continue
 			}
 			keys = append(keys, k)

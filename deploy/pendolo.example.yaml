@@ -1,0 +1,52 @@
+# Pendolo configuration. Every field is optional; these are the defaults
+# unless marked "example".
+
+dataDir: /data                 # SQLite database
+automationsDir: /automations   # one folder per automation
+workers: 4                     # runs executed at the same time
+
+server:
+  listen: ":8080"              # /healthz lives here
+
+# Where secret://<name> references are read from: a file named <name> in
+# dir, then the variable <envPrefix><NAME> (e.g. PENDOLO_SECRET_SERVER_SSH_KEY).
+secrets:
+  dir: /run/secrets
+  envPrefix: PENDOLO_SECRET_
+
+# Ping an external monitor (Healthchecks.io, Uptime Kuma, Better Stack...)
+# so you hear about it when Pendolo itself stops. Example:
+# heartbeat:
+#   url: secret://heartbeat-url
+#   interval: 5m
+
+retention:
+  runs: 2160h                  # keep run history for 90 days
+
+# Example: language model providers. type is anthropic, or openai for any
+# OpenAI-compatible API (OpenAI, OpenRouter, Gemini's OpenAI endpoint,
+# Ollama, LM Studio, vLLM, Groq).
+providers:
+  anthropic:
+    type: anthropic
+    apiKey: secret://anthropic-api-key
+  ollama:
+    type: openai
+    baseURL: http://ollama:11434/v1
+
+# Example: the aliases automations use. Prices are per million tokens in
+# EUR and drive budget.maxCostEur; the values below are Anthropic's USD list
+# prices from October 2026 - convert and check them for your account.
+models:
+  smart:
+    provider: anthropic
+    model: claude-opus-5-5
+    fallbacks: default         # retry policy refusals on a fallback model
+    price: { input: 4.00, output: 20.00 }
+  fast:
+    provider: anthropic
+    model: claude-haiku-5-5
+    price: { input: 0.10, output: 0.50 }
+  local:
+    provider: ollama
+    model: llama3.3

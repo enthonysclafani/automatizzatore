@@ -60,3 +60,18 @@ jobs:
           build-args: |
             VERSION=${{ github.sha }}
             COMMIT=${{ github.sha }}
+      - name: Build image for the smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: pendolo:ci
+      - name: Smoke test
+        run: |
+          docker run --rm pendolo:ci version
+          docker run --rm -v "$PWD/templates:/automations:ro" pendolo:ci validate --strict /automations
+          docker run -d --name pendolo -v "$PWD/templates:/automations:ro" pendolo:ci server
+          for i in $(seq 1 20); do docker exec pendolo pendolo healthcheck && break; sleep 1; done
+          docker exec pendolo pendolo healthcheck
+          docker exec pendolo pendolo list
+          docker logs pendolo

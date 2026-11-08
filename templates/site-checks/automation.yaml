@@ -1,5 +1,10 @@
 # Checks a website and its server twice a day.
 # The language model is used only when something is wrong, to write the alert.
+#
+# Secrets (files in the secrets folder, or PENDOLO_SECRET_* variables):
+#   server-ssh-key   private key for the server-health step
+#   alerts-webhook   incoming-webhook URL (Slack, Mattermost, Discord, ntfy...)
+# No server to check? Delete the "server" step and its mentions below.
 apiVersion: pendolo/v1
 kind: Automation
 metadata:
@@ -19,7 +24,7 @@ budget:
   timeout: 5m
 notifications:
   on: failure
-  channels: ["email:ops@example.com"]
+  channels: ["webhook:secret://alerts-webhook"]
 steps:
   - id: homepage
     type: http
@@ -57,11 +62,13 @@ steps:
       homepage: "${steps.homepage}"
       tls: "${steps.tls}"
       server: "${steps.server}"
+    continueOnError: true
 
   - id: alert
-    type: connector
+    type: http
     if: "${steps.homepage.failed || steps.tls.failed || steps.server.failed}"
-    action: slack.send_message
-    with:
-      channel: "#ops"
-      text: "${steps.report.output}"
+    request:
+      method: POST
+      url: "secret://alerts-webhook"
+      body:
+        text: "${steps.report.succeeded ? steps.report.output : 'site-checks: a check failed. Details: pendolo show ' + automation.runId}"

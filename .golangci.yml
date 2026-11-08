@@ -27,6 +27,9 @@ linters:
     rules:
       - path: _test\.go
         linters: [gosec, unparam]
+      - path: cmd/
+        linters: [gosec]
+        text: G703 # paths given on the command line are the user's own
 
 formatters:
   enable:

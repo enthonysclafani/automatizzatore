@@ -83,17 +83,50 @@ Every step has an `id` (lowercase letters, digits, underscores; unique in the wh
 
 ## Expressions
 
-Values can include expressions written as `${ ... }`:
+Values can include expressions written as `${ ... }`. A value that is exactly one expression keeps its type (a list stays a list); text around expressions makes the result a string, with lists and objects written as JSON.
 
 | Name | Meaning |
 | --- | --- |
-| `steps.<id>.output` | The output of an earlier step. Also `.failed`, `.succeeded`, `.skipped`. |
-| `trigger` | What started the run, such as `trigger.email.id`. |
+| `steps.<id>.output` | The output of an earlier step. Also `.failed`, `.succeeded`, `.skipped`, `.status`, `.error`. |
+| `trigger` | What started the run: `trigger.type`, `trigger.scheduledFor`, and per-trigger data. |
 | `item`, `index` | The current element inside a `foreach`. |
-| `date`, `now` | The run's date and timestamp. |
-| `automation` | The automation's own metadata. |
+| `date` | The run's date (YYYY-MM-DD) in the time zone of the automation's schedule. |
+| `now` | The run's start time (RFC 3339, UTC). |
+| `automation` | `automation.name`, `automation.description`, `automation.workspace`, `automation.runId`. |
 
-The validator checks that every expression starts from one of these names, that `steps.<id>` names a step that runs earlier, and that `item` and `index` appear only inside a `foreach`. A step inside a `foreach` is not visible outside it; use the `foreach` step's output instead. `if` and `items` must be a single expression. The evaluator itself arrives with the engine in phase 1.
+The language is [expr](https://expr-lang.org): dots for fields, `[0]` for list items, `== != < >`, `&& || !`, `cond ? a : b`, and functions such as `len()`, `upper()`, `join()`, `filter()`. Examples:
+
+```yaml
+if: "${steps.homepage.failed || steps.tls.failed}"
+text: "${steps.report.succeeded ? steps.report.output : 'check failed'}"
+COUNT: "${len(steps.fetch.output.json.items)}"
+```
+
+The validator parses every expression and checks that names exist, that `steps.<id>` points to a step that runs earlier, and that `item` and `index` appear only inside a `foreach`. A step inside a `foreach` is not visible outside it; use the `foreach` step's output instead. `if` and `items` must be a single expression.
+
+**Shell code is never interpolated.** In a shell step's `run`, `${VAR}` is the shell's own syntax and Pendolo leaves it alone. Pass values through `env` instead, which keeps them from being pasted into code:
+
+```yaml
+- id: report
+  type: shell
+  run: 'echo "status $STATUS"'
+  env: { STATUS: "${steps.homepage.output.status}" }
+```
+
+### Step outputs
+
+| Type | `output` |
+| --- | --- |
+| `http` | `status`, `ok`, `latencyMs`, `headers`, `body` (first 1 MiB), `json` when the response is JSON |
+| `shell` | `exitCode`, `stdout`, `stderr` (1 MiB each), `json` when stdout is JSON |
+| `llm` | The answer as text, or the parsed object when `outputSchema` is set |
+| `foreach` | A list with, for each item, the outputs of its nested steps by id |
+
+An `http` step fails on a status of 400 or more unless `expect.status` says otherwise. A `shell` step fails on a non-zero exit code. A failed step stops the run unless it has `continueOnError: true`; the run then still succeeds, and the failure counts as an anomaly for notifications.
+
+### Available today
+
+`http`, `shell`, `llm` and `foreach` run now. `foreach` handles items one at a time; `concurrency` is accepted and will apply in a later phase. `connector`, `agent` and `approval` steps validate but fail at run time with a clear message until phase 3. Notifications are delivered to `webhook:` channels (a JSON POST with `text` and `content`, which Slack, Mattermost and Discord webhooks accept); `slack:`, `telegram:` and `email:` channels arrive with the connectors.
 
 ## Secrets
 

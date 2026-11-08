@@ -100,7 +100,10 @@ func TestInvalid(t *testing.T) {
 			"      - { id: inner, type: http, request: { url: \"${item.url}\" } }\n" +
 			"  - id: after\n    type: http\n    request: { url: \"${steps.inner.output}\" }\n", "inside foreach \"loop\"", 0},
 		{"item outside foreach", header + "  - id: a\n    type: http\n    request: { url: \"${item.url}\" }\n", "only inside a foreach", 11},
-		{"unknown root", header + "  - id: a\n    type: http\n    request: { url: \"${secret.token}\" }\n", "must start with one of", 11},
+		{"unknown root", header + "  - id: a\n    type: http\n    request: { url: \"${secret.token}\" }\n", "unknown name \"secret\"", 11},
+		{"syntax error", header + "  - id: a\n    type: http\n    request: { url: \"${steps.a.output +}\" }\n", "invalid expression", 11},
+		{"ref inside function", header + "  - id: a\n    type: http\n    request: { url: \"${len(steps.later.output)}\" }\n" + strings.Replace(okStep, "ping", "later", 1), "runs later", 11},
+		{"expression in shell run", header + okStep + "  - id: a\n    type: shell\n    run: echo ${steps.ping.output.status}\n", "not evaluated in run", 14},
 		{"bare steps", header + "  - id: a\n    type: http\n    request: { url: \"${steps}\" }\n", "must name a step", 11},
 		{"unclosed expression", header + "  - id: a\n    type: http\n    request: { url: \"${steps.x.output\" }\n", "unclosed", 11},
 		{"empty expression", header + "  - id: a\n    type: http\n    request: { url: \"${ }\" }\n", "empty expression", 11},
@@ -124,6 +127,20 @@ func TestInvalid(t *testing.T) {
 				t.Fatalf("error %q at line %d, want line %d", p.Message, p.Line, tc.line)
 			}
 		})
+	}
+}
+
+func TestExpressionsWithFunctions(t *testing.T) {
+	y := header + okStep + "  - id: a\n    type: shell\n    run: echo \"$N\"\n    env:\n      N: \"${len(steps.ping.output.json.items) > 0 && !steps.ping.failed}\"\n      U: \"${upper(automation.name)}-${date}\"\n"
+	if res := Validate([]byte(y), Options{}); len(res.Problems) > 0 {
+		t.Fatalf("unexpected problems:\n%s", list(res.Problems))
+	}
+}
+
+func TestShellVariablesInRun(t *testing.T) {
+	y := header + "  - id: a\n    type: shell\n    run: 'echo \"${HOME} ${N:-1} ${#ARR[@]} ${date_custom}\"'\n"
+	if res := Validate([]byte(y), Options{}); len(res.Problems) > 0 {
+		t.Fatalf("shell variables flagged:\n%s", list(res.Problems))
 	}
 }
 

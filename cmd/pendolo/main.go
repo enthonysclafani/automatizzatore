@@ -1,7 +1,4 @@
 // Command pendolo runs and manages automations.
-//
-// Phase 0 ships the validator: `pendolo validate` checks automation
-// manifests against the pendolo/v1 schema and its rules.
 package main
 
 import (
@@ -30,13 +27,23 @@ const (
 const usage = `pendolo: automations that keep running.
 
 Usage:
+  pendolo server                     Run the scheduler, the workers and the health endpoint.
+  pendolo run <folder|name>          Run an automation once, now, and show what happened.
+  pendolo trigger <name>             Queue a run for the server to pick up.
+  pendolo list                       List automations and their state.
+  pendolo runs [--automation n] [--status s] [--limit n]
+                                     List recent runs.
+  pendolo show <run-id> [--full]     Show a run step by step, with logs and model calls.
+  pendolo pause <name>               Stop scheduling an automation.
+  pendolo resume <name>              Schedule it again.
   pendolo validate [--format text|json] [--strict] <path>...
-      Check automation manifests. A path is a manifest file or a folder,
-      searched for files named automation.yaml.
-  pendolo schema
-      Print the JSON Schema of the manifest format (pendolo/v1).
-  pendolo version
-      Print version information.
+                                     Check manifests; a folder is searched for automation.yaml.
+  pendolo schema                     Print the JSON Schema of the manifest format.
+  pendolo healthcheck [--url u]      Exit 0 if the server is healthy (for Docker).
+  pendolo version                    Print version information.
+
+Commands that read the database accept --config <file> (default: $PENDOLO_CONFIG,
+then ./pendolo.yaml if present). Most also accept --json.
 `
 
 func main() {
@@ -49,6 +56,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	switch args[0] {
+	case "server":
+		return cmdServer(args[1:], stdout, stderr)
+	case "run":
+		return cmdRun(args[1:], stdout, stderr)
+	case "trigger":
+		return cmdTrigger(args[1:], stdout, stderr)
+	case "list":
+		return cmdList(args[1:], stdout, stderr)
+	case "runs":
+		return cmdRuns(args[1:], stdout, stderr)
+	case "show":
+		return cmdShow(args[1:], stdout, stderr)
+	case "pause", "resume":
+		return cmdPause(args[0] == "pause", args[1:], stdout, stderr)
+	case "healthcheck":
+		return cmdHealthcheck(args[1:], stdout, stderr)
 	case "validate":
 		return runValidate(args[1:], stdout, stderr)
 	case "schema":
