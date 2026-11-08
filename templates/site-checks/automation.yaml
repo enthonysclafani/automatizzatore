@@ -1,0 +1,67 @@
+# Checks a website and its server twice a day.
+# The language model is used only when something is wrong, to write the alert.
+apiVersion: pendolo/v1
+kind: Automation
+metadata:
+  name: site-checks
+  description: Uptime, TLS certificate and server health for one site, with an alert only on problems.
+  labels:
+    template: v1
+triggers:
+  - schedule:
+      cron: "0 8,16 * * *"
+      timezone: Europe/Rome
+      misfire: run_once
+  - manual: {}
+autonomy: auto
+budget:
+  maxCostEur: 0.05
+  timeout: 5m
+notifications:
+  on: failure
+  channels: ["email:ops@example.com"]
+steps:
+  - id: homepage
+    type: http
+    request:
+      url: "https://example.com/"
+    expect:
+      status: [200]
+      maxLatency: 2s
+    retry: { max: 2, backoff: 30s }
+    continueOnError: true
+
+  - id: tls
+    type: shell
+    script: scripts/tls-expiry.sh
+    args: ["example.com", "21"]
+    timeout: 30s
+    continueOnError: true
+
+  - id: server
+    type: shell
+    script: scripts/server-health.sh
+    env:
+      SSH_TARGET: "deploy@example.com"
+      SSH_PRIVATE_KEY: "secret://server-ssh-key"
+      DISK_LIMIT_PERCENT: "85"
+    timeout: 1m
+    continueOnError: true
+
+  - id: report
+    type: llm
+    if: "${steps.homepage.failed || steps.tls.failed || steps.server.failed}"
+    model: fast
+    prompt: prompts/report.md
+    input:
+      homepage: "${steps.homepage}"
+      tls: "${steps.tls}"
+      server: "${steps.server}"
+
+  - id: alert
+    type: connector
+    if: "${steps.homepage.failed || steps.tls.failed || steps.server.failed}"
+    action: slack.send_message
+    with:
+      channel: "#ops"
+      text: "${steps.report.output}"

@@ -1,0 +1,38 @@
+# Every evening, sends a summary of the day's email to Slack.
+apiVersion: pendolo/v1
+kind: Automation
+metadata:
+  name: gmail-digest
+  description: Daily digest of labelled email, with what needs action and which drafts are ready.
+  labels:
+    template: v1
+triggers:
+  - schedule:
+      cron: "0 18 * * *"
+      timezone: Europe/Rome
+      misfire: run_once
+autonomy: auto
+budget:
+  maxCostEur: 0.10
+  timeout: 5m
+steps:
+  - id: fetch
+    type: connector
+    action: gmail.search
+    connection: gmail
+    with:
+      query: "label:pendolo newer_than:1d"
+      maxResults: 100
+
+  - id: digest
+    type: llm
+    model: fast
+    prompt: prompts/digest.md
+    input: "${steps.fetch.output}"
+
+  - id: send
+    type: connector
+    action: slack.send_message
+    with:
+      channel: "#email"
+      text: "${steps.digest.output}"

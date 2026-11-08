@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/enthonysclafani/automatizzatore/spec/pendolo-v1.schema.json",
+  "title": "Pendolo automation manifest (pendolo/v1)",
+  "description": "An automation: when it runs (triggers), what it does (steps) and how much autonomy it has.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "triggers", "steps"],
+  "properties": {
+    "apiVersion": { "const": "pendolo/v1" },
+    "kind": { "const": "Automation" },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "triggers": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/trigger" }
+    },
+    "autonomy": { "$ref": "#/$defs/autonomy" },
+    "budget": { "$ref": "#/$defs/budget" },
+    "notifications": { "$ref": "#/$defs/notifications" },
+    "steps": { "$ref": "#/$defs/steps" }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "description": "Lowercase letters, digits and hyphens; starts with a letter or digit; at most 63 characters."
+    },
+    "stepId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,62}$",
+      "description": "Lowercase letters, digits and underscores; starts with a letter."
+    },
+    "duration": {
+      "type": "string",
+      "pattern": "^([0-9]+(ms|s|m|h))+$",
+      "description": "A Go-style duration such as 30s, 5m, 1h30m."
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/\\\\]",
+      "description": "A path relative to the automation folder. It may not start with '/' or contain '..' segments."
+    },
+    "actionRef": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "description": "<connector>.<action>, e.g. gmail.apply_labels."
+    },
+    "autonomy": {
+      "enum": ["observe", "draft", "ask", "auto"],
+      "description": "observe: read only. draft: writes become drafts. ask: risky actions need approval. auto: only destructive actions need approval."
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "description": { "type": "string", "maxLength": 2000 },
+        "workspace": { "$ref": "#/$defs/name" },
+        "labels": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/name" },
+          "additionalProperties": { "type": "string", "maxLength": 200 }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxCostEur": { "type": "number", "exclusiveMinimum": 0 },
+        "timeout": { "$ref": "#/$defs/duration" }
+      }
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channels"],
+      "properties": {
+        "on": { "enum": ["always", "failure", "anomaly", "never"], "default": "failure" },
+        "channels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^(slack|telegram|email|webhook):.+$",
+            "description": "<channel>:<target>, e.g. slack:#ops or email:me@example.com."
+          }
+        }
+      }
+    },
+    "trigger": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "description": "Exactly one of schedule, webhook, email or manual.",
+      "additionalProperties": false,
+      "properties": {
+        "schedule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cron"],
+          "properties": {
+            "cron": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Five-field cron expression or a descriptor such as @daily."
+            },
+            "timezone": { "type": "string", "default": "UTC", "description": "IANA time zone, e.g. Europe/Rome." },
+            "misfire": {
+              "enum": ["run_once", "skip", "run_all"],
+              "default": "run_once",
+              "description": "What to do with runs missed while Pendolo was down."
+            }
+          }
+        },
+        "webhook": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "secret": { "type": "string", "pattern": "^secret://.+$" }
+          }
+        },
+        "email": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["connection"],
+          "properties": {
+            "connection": { "$ref": "#/$defs/name" },
+            "query": { "type": "string" },
+            "interval": { "$ref": "#/$defs/duration" }
+          }
+        },
+        "manual": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/step" }
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max"],
+      "properties": {
+        "max": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "backoff": { "$ref": "#/$defs/duration" }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stepId" },
+        "type": { "enum": ["connector", "http", "shell", "llm", "agent", "approval", "foreach"] },
+        "name": { "type": "string", "maxLength": 200 },
+        "if": { "type": "string", "minLength": 1, "description": "Expression; the step is skipped when it is false." },
+        "timeout": { "$ref": "#/$defs/duration" },
+        "retry": { "$ref": "#/$defs/retry" },
+        "continueOnError": { "type": "boolean" }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "connector" } } }, "then": { "$ref": "#/$defs/connectorStep" } },
+        { "if": { "properties": { "type": { "const": "http" } } }, "then": { "$ref": "#/$defs/httpStep" } },
+        { "if": { "properties": { "type": { "const": "shell" } } }, "then": { "$ref": "#/$defs/shellStep" } },
+        { "if": { "properties": { "type": { "const": "llm" } } }, "then": { "$ref": "#/$defs/llmStep" } },
+        { "if": { "properties": { "type": { "const": "agent" } } }, "then": { "$ref": "#/$defs/agentStep" } },
+        { "if": { "properties": { "type": { "const": "approval" } } }, "then": { "$ref": "#/$defs/approvalStep" } },
+        { "if": { "properties": { "type": { "const": "foreach" } } }, "then": { "$ref": "#/$defs/foreachStep" } }
+      ]
+    },
+    "connectorStep": {
+      "required": ["action"],
+      "properties": {
+        "id": true, "type": true, "name": true, "if": true, "timeout": true, "retry": true, "continueOnError": true,
+        "action": { "$ref": "#/$defs/actionRef" },
+        "connection": { "$ref": "#/$defs/name" },
+        "with": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "httpStep": {
+      "required": ["request"],
+      "properties": {
+        "id": true, "type": true, "name": true, "if": true, "timeout": true, "retry": true, "continueOnError": true,
+        "request": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url"],
+          "properties": {
+            "method": { "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"], "default": "GET" },
+            "url": { "type": "string", "minLength": 1 },
+            "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+            "body": {}
+          }
+        },
+        "expect": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 100, "maximum": 599 } },
+            "maxLatency": { "$ref": "#/$defs/duration" },
+            "bodyContains": { "type": "string" }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "shellStep": {
+      "oneOf": [{ "required": ["run"] }, { "required": ["script"] }],
+      "properties": {
+        "id": true, "type": true, "name": true, "if": true, "timeout": true, "retry": true, "continueOnError": true,
+        "run": { "type": "string", "minLength": 1, "description": "Inline script." },
+        "script": { "$ref": "#/$defs/relativePath" },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "llmStep": {
+      "oneOf": [{ "required": ["prompt"] }, { "required": ["promptText"] }],
+      "properties": {
+        "id": true, "type": true, "name": true, "if": true, "timeout": true, "retry": true, "continueOnError": true,
+        "model": { "type": "string", "minLength": 1, "default": "smart", "description": "A model alias (fast, smart, local) or provider/model." },
+        "prompt": { "$ref": "#/$defs/relativePath" },
+        "promptText": { "type": "string", "minLength": 1 },
+        "system": { "type": "string" },
+        "input": {},
+        "outputSchema": { "type": "object", "description": "JSON Schema the response must match." },
+        "temperature": { "type": "number", "minimum": 0, "maximum": 2 }
+      },
+      "additionalProperties": false
+    },
+    "agentStep": {
+      "oneOf": [{ "required": ["prompt"] }, { "required": ["promptText"] }],
+      "required": ["tools"],
+      "properties": {
+        "id": true, "type": true, "name": true, "if": true, "timeout": true, "retry": true, "continueOnError": true,
+        "model": { "type": "string", "minLength": 1, "default": "smart" },
+        "prompt": { "$ref": "#/$defs/relativePath" },
+        "promptText": { "type": "string", "minLength": 1 },
+        "tools": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/actionRef" } },
+        "maxIterations": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
+        "maxCostEur": { "type": "number", "exclusiveMinimum": 0 },
+        "outputSchema": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "approvalStep": {
+      "required": ["message"],
+      "properties": {
+        "id": true, "type": true, "name": true, "if": true, "timeout": true, "retry": true, "continueOnError": true,
+        "message": { "type": "string", "minLength": 1 },
+        "approvers": { "type": "array", "items": { "enum": ["owner", "admin", "approver"] } },
+        "onTimeout": { "enum": ["reject", "approve"], "default": "reject" }
+      },
+      "additionalProperties": false
+    },
+    "foreachStep": {
+      "required": ["items", "steps"],
+      "properties": {
+        "id": true, "type": true, "name": true, "if": true, "timeout": true, "retry": true, "continueOnError": true,
+        "items": { "type": "string", "minLength": 1, "description": "Expression that evaluates to a list; each element is ${item}." },
+        "concurrency": { "type": "integer", "minimum": 1, "maximum": 20, "default": 1 },
+        "steps": { "$ref": "#/$defs/steps" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

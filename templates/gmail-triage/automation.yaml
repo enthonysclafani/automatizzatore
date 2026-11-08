@@ -1,0 +1,61 @@
+# Classifies new Gmail messages, applies labels and drafts replies.
+# Autonomy "draft": replies are saved as Gmail drafts and never sent.
+apiVersion: pendolo/v1
+kind: Automation
+metadata:
+  name: gmail-triage
+  description: Label every new email and prepare a draft reply when one is needed.
+  labels:
+    template: v1
+triggers:
+  - email:
+      connection: gmail
+      query: "in:inbox is:unread"
+      interval: 5m
+autonomy: draft
+budget:
+  maxCostEur: 0.20
+  timeout: 10m
+notifications:
+  on: failure
+  channels: ["slack:#alerts"]
+steps:
+  - id: classify
+    type: llm
+    model: fast
+    prompt: prompts/classify.md
+    input: "${trigger.email}"
+    outputSchema:
+      type: object
+      required: [category, needsReply, summary]
+      properties:
+        category: { enum: [urgent, client, invoice, newsletter, spam, other] }
+        needsReply: { type: boolean }
+        summary: { type: string }
+        actions: { type: array, items: { type: string } }
+
+  - id: label
+    type: connector
+    action: gmail.apply_labels
+    connection: gmail
+    with:
+      messageId: "${trigger.email.id}"
+      labels: ["pendolo/${steps.classify.output.category}"]
+
+  - id: draft_reply
+    type: llm
+    if: "${steps.classify.output.needsReply}"
+    model: smart
+    prompt: prompts/reply.md
+    input:
+      email: "${trigger.email}"
+      summary: "${steps.classify.output.summary}"
+
+  - id: save_draft
+    type: connector
+    if: "${steps.classify.output.needsReply}"
+    action: gmail.create_draft
+    connection: gmail
+    with:
+      threadId: "${trigger.email.threadId}"
+      body: "${steps.draft_reply.output}"

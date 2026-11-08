@@ -1,0 +1,74 @@
+# Every Monday: find article ideas, validate them on OpenSEO, write the plan
+# to Google Docs and post the link on Slack.
+apiVersion: pendolo/v1
+kind: Automation
+metadata:
+  name: editorial-plan
+  description: Weekly editorial plan with ideas validated by keyword data.
+  labels:
+    template: v1
+triggers:
+  - schedule:
+      cron: "0 9 * * MON"
+      timezone: Europe/Rome
+      misfire: run_once
+  - manual: {}
+autonomy: ask
+budget:
+  maxCostEur: 1.00
+  timeout: 15m
+notifications:
+  on: always
+  channels: ["slack:#content"]
+steps:
+  - id: ideas
+    type: agent
+    model: smart
+    prompt: prompts/ideas.md
+    tools: [web.search, openseo.research_keywords]
+    maxIterations: 15
+    maxCostEur: 0.50
+    outputSchema:
+      type: object
+      required: [keywords, ideas]
+      properties:
+        keywords: { type: array, items: { type: string }, maxItems: 30 }
+        ideas:
+          type: array
+          items:
+            type: object
+            required: [title, keyword, angle]
+            properties:
+              title: { type: string }
+              keyword: { type: string }
+              angle: { type: string }
+
+  - id: validate
+    type: connector
+    action: openseo.get_keyword_metrics
+    connection: openseo
+    with:
+      keywords: "${steps.ideas.output.keywords}"
+
+  - id: write
+    type: llm
+    model: smart
+    prompt: prompts/write.md
+    input:
+      ideas: "${steps.ideas.output.ideas}"
+      metrics: "${steps.validate.output}"
+
+  - id: save
+    type: connector
+    action: google_docs.create
+    connection: google
+    with:
+      title: "Editorial plan ${date}"
+      body: "${steps.write.output}"
+
+  - id: notify
+    type: connector
+    action: slack.send_message
+    with:
+      channel: "#content"
+      text: "New editorial plan: ${steps.save.output.url}"
