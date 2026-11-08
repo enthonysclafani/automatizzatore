@@ -1,6 +1,6 @@
 //go:build !unix
 
-package engine
+package runner
 
 import (
 	"os/exec"

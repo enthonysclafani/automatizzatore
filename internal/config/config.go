@@ -26,6 +26,8 @@ type Config struct {
 	Workers int `yaml:"workers"`
 
 	Server    Server              `yaml:"server"`
+	Runner    Runner              `yaml:"runner"`
+	Notify    Notify              `yaml:"notify"`
 	Heartbeat Heartbeat           `yaml:"heartbeat"`
 	Secrets   Secrets             `yaml:"secrets"`
 	Retention Retention           `yaml:"retention"`
@@ -36,6 +38,42 @@ type Config struct {
 // Server configures the HTTP listener (health and, later, the API).
 type Server struct {
 	Listen string `yaml:"listen"`
+}
+
+// Runner points shell steps at a separate `pendolo runner` process. Without
+// a URL, scripts run as child processes of the server.
+type Runner struct {
+	URL string `yaml:"url"`
+	// Token is shared with the runner, usually a secret:// reference.
+	Token string `yaml:"token"`
+}
+
+// Notify holds the credentials of notification channels.
+type Notify struct {
+	Slack    SlackNotify    `yaml:"slack"`
+	Telegram TelegramNotify `yaml:"telegram"`
+	Email    EmailNotify    `yaml:"email"`
+}
+
+// SlackNotify posts with a bot token (chat:write scope).
+type SlackNotify struct {
+	Token string `yaml:"token"`
+}
+
+// TelegramNotify posts with a bot token from @BotFather.
+type TelegramNotify struct {
+	BotToken string `yaml:"botToken"`
+}
+
+// EmailNotify sends through an SMTP server.
+type EmailNotify struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	From     string `yaml:"from"`
+	// Security is starttls (default), tls (implicit, usually port 465) or none.
+	Security string `yaml:"security"`
 }
 
 // Heartbeat pings an external monitor so you learn when Pendolo itself stops.
@@ -182,6 +220,17 @@ func (c Config) Validate() error {
 		if m.Model == "" {
 			errs = append(errs, fmt.Errorf("model %q: model is empty", alias))
 		}
+	}
+	if c.Runner.URL != "" && c.Runner.Token == "" {
+		errs = append(errs, errors.New("runner.token is required when runner.url is set"))
+	}
+	switch c.Notify.Email.Security {
+	case "", "starttls", "tls", "none":
+	default:
+		errs = append(errs, fmt.Errorf("notify.email.security must be starttls, tls or none, got %q", c.Notify.Email.Security))
+	}
+	if c.Notify.Email.Host != "" && c.Notify.Email.From == "" {
+		errs = append(errs, errors.New("notify.email.from is required when notify.email.host is set"))
 	}
 	if c.Heartbeat.URL != "" && c.Heartbeat.Interval.Std() < 10*time.Second {
 		errs = append(errs, errors.New("heartbeat.interval must be at least 10s"))

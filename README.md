@@ -9,7 +9,7 @@ Pendolo is a self-hosted automation engine. You describe what you want in plain 
 - **Runs anywhere.** One binary and one container image for Linux, macOS and Windows, on amd64 and arm64.
 - **Transparent.** Every run, step, model call, cost and approval is recorded.
 
-**Status: phase 1.** The engine runs: scheduler, run queue, `http`, `shell`, `llm` and `foreach` steps, any model provider, secrets, webhook notifications and full run history in SQLite, driven from the command line. The dashboard and the connectors come next; see the [roadmap](#roadmap).
+**Status: phase 1 complete.** The engine runs: schedules and webhook triggers, a run queue, `http`, `shell`, `llm` and `foreach` steps, any model provider, secrets, scripts isolated in a separate runner container, notifications by webhook, Slack, Telegram and email, and full run history in SQLite, driven from the command line. The dashboard and the connectors come next; see the [roadmap](#roadmap).
 
 ## Try it
 
@@ -52,7 +52,8 @@ The full format is in [docs/manifest.md](docs/manifest.md), the server settings 
 
 | Command | What it does |
 | --- | --- |
-| `pendolo server` | Runs the scheduler, the workers and the health endpoint. |
+| `pendolo server` | Runs the scheduler, the workers, webhooks and the health endpoint. |
+| `pendolo runner` | Executes shell steps for a server, isolated from it. |
 | `pendolo run <folder or name>` | Runs an automation once, now, and prints every step. |
 | `pendolo trigger <name>` | Queues a run for the server. |
 | `pendolo list` | Lists automations and their state. |
@@ -77,6 +78,7 @@ Layout:
 cmd/pendolo/          command-line entry point
 internal/manifest/    manifest types and validation
 internal/engine/      runs steps: http, shell, llm, foreach; retries, timeouts, budget
+internal/runner/      executes scripts, locally or in the separate runner
 internal/scheduler/   turns schedules into queued runs
 internal/store/       SQLite: queue, schedule state, run history
 internal/llm/         model gateway: Anthropic and OpenAI-compatible adapters
@@ -97,7 +99,7 @@ docs/                 documentation
 | Phase | Scope | Done when |
 | --- | --- | --- |
 | 0. Foundations (done) | Repo, CI, manifest schema, validator | A YAML manifest is validated from the CLI |
-| 1. Engine (built, on trial) | Scheduler, queue, http/shell/llm steps, SQLite, `pendolo run` | Site checks run for 7 days without stopping |
+| 1. Engine (done, 7-day trial pending) | Scheduler, queue, http/shell/llm steps, SQLite, `pendolo run` | Site checks run for 7 days without stopping |
 | 2. Dashboard | Login, OIDC, roles, workspaces, encrypted secrets, run timeline, costs | A viewer sees only their own workspace |
 | 3. Connectors | Gmail with a setup wizard, Slack, Google Docs, MCP, agent and approval steps | Email triage and editorial plan run end to end |
 | 4. Builder and v0.1 | Plain language to manifest, templates, multi-arch image, security review | A sentence becomes an active automation |

@@ -6,7 +6,28 @@ automationsDir: /automations   # one folder per automation
 workers: 4                     # runs executed at the same time
 
 server:
-  listen: ":8080"              # /healthz lives here
+  listen: ":8080"              # /healthz and /hooks/<automation> live here
+
+# Shell steps run in the separate runner container (see docker-compose.yml).
+# Remove this block to run scripts inside the server instead.
+runner:
+  url: http://runner:8090
+  token: secret://runner-token
+
+# Credentials of notification channels. Automations list channels such as
+# slack:#ops, telegram:<chat id>, email:me@example.com or webhook:<url>.
+# notify:
+#   slack:
+#     token: secret://slack-bot-token        # bot token with chat:write
+#   telegram:
+#     botToken: secret://telegram-bot-token  # from @BotFather
+#   email:
+#     host: smtp.example.com
+#     port: 587
+#     security: starttls                     # starttls, tls or none
+#     username: pendolo@example.com
+#     password: secret://smtp-password
+#     from: Pendolo <pendolo@example.com>
 
 # Where secret://<name> references are read from: a file named <name> in
 # dir, then the variable <envPrefix><NAME> (e.g. PENDOLO_SECRET_SERVER_SSH_KEY).

@@ -155,6 +155,7 @@ func TestWarnings(t *testing.T) {
 		{"model without budget", noBudget + llmStep, "spending cap"},
 		{"model in foreach without budget", noBudget + okStep + "  - id: loop\n    type: foreach\n    items: \"${steps.ping.output}\"\n    steps:\n      - { id: b, type: llm, promptText: \"${item}\" }\n", "spending cap"},
 		{"schedule without timezone", noTZ + okStep, "runs in UTC"},
+		{"webhook without secret", strings.Replace(header, "  - schedule:", "  - webhook: {}\n  - schedule:", 1) + okStep, "without a secret"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

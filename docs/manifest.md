@@ -44,6 +44,10 @@ Each trigger has exactly one key.
 
 `misfire` decides what happens to runs missed while Pendolo was down. Without `timezone` a schedule runs in UTC, and the validator warns about it.
 
+A `webhook` trigger listens at `POST /hooks/<automation name>`. The caller proves it knows the secret with `Authorization: Bearer <secret>`, or signs the body with HMAC-SHA256 in `X-Pendolo-Signature` or `X-Hub-Signature-256` (`sha256=<hex>`, the format GitHub uses). The run receives `trigger.body` (text, up to 1 MiB), `trigger.json` (when the body is JSON), `trigger.headers` (lower-case, credentials removed) and `trigger.query`. The answer is `202` with the run id. Without `secret` anyone who can reach Pendolo can start the automation, and the validator warns about it.
+
+The `email` trigger arrives with the Gmail connector in phase 3.
+
 ## Autonomy
 
 The level combines with the risk each connector action declares (read, write, send, destructive):
@@ -122,11 +126,20 @@ The validator parses every expression and checks that names exist, that `steps.<
 | `llm` | The answer as text, or the parsed object when `outputSchema` is set |
 | `foreach` | A list with, for each item, the outputs of its nested steps by id |
 
-An `http` step fails on a status of 400 or more unless `expect.status` says otherwise. A `shell` step fails on a non-zero exit code. A failed step stops the run unless it has `continueOnError: true`; the run then still succeeds, and the failure counts as an anomaly for notifications.
+An `http` step fails on a status of 400 or more unless `expect.status` says otherwise. A `shell` step fails on a non-zero exit code. Shell steps run in the separate runner container when one is configured (see [running.md](running.md)). A failed step stops the run unless it has `continueOnError: true`; the run then still succeeds, and the failure counts as an anomaly for notifications.
 
 ### Available today
 
-`http`, `shell`, `llm` and `foreach` run now. `foreach` handles items one at a time; `concurrency` is accepted and will apply in a later phase. `connector`, `agent` and `approval` steps validate but fail at run time with a clear message until phase 3. Notifications are delivered to `webhook:` channels (a JSON POST with `text` and `content`, which Slack, Mattermost and Discord webhooks accept); `slack:`, `telegram:` and `email:` channels arrive with the connectors.
+`http`, `shell`, `llm` and `foreach` run now. `foreach` runs up to `concurrency` items at a time (default 1); the first failing item stops the others. `connector`, `agent` and `approval` steps validate but fail at run time with a clear message until phase 3.
+
+### Notifications
+
+| Channel | Example | Needs |
+| --- | --- | --- |
+| `webhook:` | `webhook:secret://alerts-webhook` | Nothing: a JSON POST with `text` and `content`, which Slack, Mattermost and Discord incoming webhooks accept |
+| `slack:` | `slack:#ops` | `notify.slack.token`, a bot token with `chat:write` |
+| `telegram:` | `telegram:-1001234567890` | `notify.telegram.botToken` |
+| `email:` | `email:ops@example.com` | `notify.email` (SMTP) |
 
 ## Secrets
 

@@ -16,7 +16,7 @@ test: ## Run tests with the race detector
 
 lint: ## Run golangci-lint and shellcheck
 	golangci-lint run ./...
-	shellcheck templates/*/scripts/*.sh
+	shellcheck templates/*/scripts/*.sh deploy/*.sh
 
 validate-templates: ## Validate the bundled automation templates
 	go run ./cmd/pendolo validate --strict templates

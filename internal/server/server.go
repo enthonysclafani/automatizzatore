@@ -23,6 +23,7 @@ import (
 	"github.com/enthonysclafani/automatizzatore/internal/llm"
 	"github.com/enthonysclafani/automatizzatore/internal/notify"
 	"github.com/enthonysclafani/automatizzatore/internal/registry"
+	"github.com/enthonysclafani/automatizzatore/internal/runner"
 	"github.com/enthonysclafani/automatizzatore/internal/scheduler"
 	"github.com/enthonysclafani/automatizzatore/internal/secrets"
 	"github.com/enthonysclafani/automatizzatore/internal/store"
@@ -49,6 +50,8 @@ type Server struct {
 	owner   string
 	wake    chan struct{}
 
+	runner *runner.Remote
+
 	mu      sync.RWMutex
 	snap    registry.Snapshot
 	running atomic.Int32
@@ -63,14 +66,31 @@ func SecretsProvider(cfg config.Config) secrets.Provider {
 	return secrets.FilesAndEnv{Dir: cfg.Secrets.Dir, EnvPrefix: cfg.Secrets.EnvPrefix}
 }
 
-// NewEngine builds an engine over st from the configuration.
-func NewEngine(cfg config.Config, st *store.Store, log *slog.Logger) *engine.Engine {
+// NewEngine builds an engine over st from the configuration. With
+// useRunner, shell steps go to the configured runner, if any.
+func NewEngine(cfg config.Config, st *store.Store, log *slog.Logger, useRunner bool) (*engine.Engine, error) {
 	sec := SecretsProvider(cfg)
 	httpClient := &http.Client{Timeout: 5 * time.Minute}
-	return &engine.Engine{
+	e := &engine.Engine{
 		Store: st, LLM: llm.New(cfg, sec), Secrets: sec, HTTP: httpClient, Log: log,
-		Notifier: &notify.Notifier{Secrets: sec, HTTP: httpClient, Log: log},
+		Notifier: &notify.Notifier{Secrets: sec, HTTP: httpClient, Log: log, Config: cfg.Notify},
 	}
+	if useRunner && cfg.Runner.URL != "" {
+		r, err := remoteRunner(cfg, sec)
+		if err != nil {
+			return nil, err
+		}
+		e.Shell = r
+	}
+	return e, nil
+}
+
+func remoteRunner(cfg config.Config, sec secrets.Provider) (runner.Remote, error) {
+	token, err := secrets.NewResolver(sec).String(cfg.Runner.Token)
+	if err != nil {
+		return runner.Remote{}, fmt.Errorf("runner.token: %w", err)
+	}
+	return runner.Remote{URL: cfg.Runner.URL, Token: token, Root: cfg.AutomationsDir}, nil
 }
 
 // New opens the database and prepares the server.
@@ -79,9 +99,17 @@ func New(cfg config.Config, log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	eng, err := NewEngine(cfg, st, log, true)
+	if err != nil {
+		_ = st.Close()
+		return nil, err
+	}
 	s := &Server{
 		cfg: cfg, log: log, store: st, secrets: SecretsProvider(cfg),
-		engine: NewEngine(cfg, st, log), owner: ownerID(), wake: make(chan struct{}, 1),
+		engine: eng, owner: ownerID(), wake: make(chan struct{}, 1),
+	}
+	if r, ok := eng.Shell.(runner.Remote); ok {
+		s.runner = &r
 	}
 	s.sched = &scheduler.Scheduler{Store: st, Owner: s.owner, Automations: s.automations, Wake: s.wake, Log: log}
 	return s, nil
@@ -92,6 +120,10 @@ func ownerID() string {
 	var b [4]byte
 	_, _ = rand.Read(b[:])
 	return fmt.Sprintf("%s/%d/%s", host, os.Getpid(), hex.EncodeToString(b[:]))
+}
+
+func (s *Server) resolveSecret(ref string) (string, error) {
+	return secrets.NewResolver(s.secrets).String(ref)
 }
 
 func (s *Server) automations() map[string]engine.Automation {

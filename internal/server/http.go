@@ -21,6 +21,7 @@ type Health struct {
 	Invalid     int       `json:"invalid"`
 	Running     int32     `json:"running"`
 	Queued      int       `json:"queued"`
+	Runner      string    `json:"runner"`
 }
 
 func (s *Server) routes() http.Handler {
@@ -33,6 +34,7 @@ func (s *Server) routes() http.Handler {
 		}
 		_ = json.NewEncoder(w).Encode(h)
 	})
+	mux.HandleFunc("POST /hooks/{name}", s.handleHook)
 	return mux
 }
 
@@ -55,5 +57,15 @@ func (s *Server) health(ctx context.Context) Health {
 		h.OK, h.Reason = false, "scheduler stalled"
 	}
 	h.Queued = queued
+	h.Runner = "local"
+	if s.runner != nil {
+		h.Runner = "ok"
+		if rerr := s.runner.Ping(ctx); rerr != nil {
+			h.Runner = rerr.Error()
+			if h.OK {
+				h.OK, h.Reason = false, "runner: "+rerr.Error()
+			}
+		}
+	}
 	return h
 }

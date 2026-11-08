@@ -1,25 +1,54 @@
-# Pendolo with Docker Compose.
+# Pendolo with Docker Compose: the server, plus a runner that executes the
+# scripts of shell steps in a separate, locked-down container.
 #
 #   1. Put your automations in ./automations (one folder each).
 #   2. Copy pendolo.example.yaml to pendolo.yaml and set your models.
-#   3. Put secrets in ./secrets, one file per secret (e.g. ./secrets/anthropic-api-key).
+#   3. Put secrets in ./secrets, one file per secret, and create the runner
+#      token:  openssl rand -hex 24 > secrets/runner-token
 #   4. docker compose up -d
 services:
   pendolo:
-    image: ghcr.io/enthonysclafani/pendolo:latest
+    image: ${PENDOLO_IMAGE:-ghcr.io/enthonysclafani/pendolo:latest}
     build: ..
     restart: unless-stopped
     command: ["server", "--log-format", "json"]
     environment:
       PENDOLO_CONFIG: /etc/pendolo/pendolo.yaml
-      TZ: Europe/Rome
+      TZ: ${TZ:-Europe/Rome}
     volumes:
       - pendolo-data:/data
       - ./automations:/automations:ro
       - ./pendolo.yaml:/etc/pendolo/pendolo.yaml:ro
       - ./secrets:/run/secrets:ro
     ports:
+      # Health and webhooks. Publish beyond localhost only behind a reverse
+      # proxy with TLS.
       - "127.0.0.1:8080:8080"
+    depends_on:
+      - runner
+
+  # Runs scripts only. It sees the automations and its token, nothing else:
+  # no database, no configuration, no other secrets, read-only file system.
+  runner:
+    image: ${PENDOLO_IMAGE:-ghcr.io/enthonysclafani/pendolo:latest}
+    restart: unless-stopped
+    command: ["runner"]
+    environment:
+      PENDOLO_AUTOMATIONS_DIR: /automations
+      TZ: ${TZ:-Europe/Rome}
+    volumes:
+      - ./automations:/automations:ro
+      - ./secrets/runner-token:/run/secrets/runner-token:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/healthz"]
+      interval: 30s
+      timeout: 5s
 
 volumes:
   pendolo-data:

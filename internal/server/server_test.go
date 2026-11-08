@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -11,10 +14,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/enthonysclafani/automatizzatore/internal/config"
+	"github.com/enthonysclafani/automatizzatore/internal/runner"
 	"github.com/enthonysclafani/automatizzatore/internal/store"
 )
 
@@ -191,4 +196,134 @@ func init() {
 	// Faster ticks keep the tests short.
 	TickInterval = 200 * time.Millisecond
 	PollInterval = 100 * time.Millisecond
+}
+
+func TestWebhookTrigger(t *testing.T) {
+	cfg := testConfig(t)
+	t.Setenv("PENDOLO_SECRET_HOOK", "hook-secret")
+	writeAutomation(t, cfg.AutomationsDir, "deploy", `apiVersion: pendolo/v1
+kind: Automation
+metadata: { name: deploy }
+triggers: [ { webhook: { secret: "secret://hook" } } ]
+steps:
+  - id: echo
+    type: shell
+    run: echo "ref=$REF"
+    env: { REF: "${trigger.json.ref}" }
+`)
+	srv, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.store.Close()
+	if err := srv.reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h := srv.routes()
+	post := func(path, body string, headers map[string]string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	body := `{"ref":"refs/heads/main"}`
+	mac := hmac.New(sha256.New, []byte("hook-secret"))
+	mac.Write([]byte(body))
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	cases := []struct {
+		name    string
+		path    string
+		headers map[string]string
+		want    int
+	}{
+		{"no credentials", "/hooks/deploy", nil, http.StatusUnauthorized},
+		{"wrong token", "/hooks/deploy", map[string]string{"Authorization": "Bearer nope"}, http.StatusUnauthorized},
+		{"wrong signature", "/hooks/deploy", map[string]string{"X-Hub-Signature-256": "sha256=00"}, http.StatusUnauthorized},
+		{"unknown automation", "/hooks/nope", nil, http.StatusNotFound},
+		{"token", "/hooks/deploy", map[string]string{"Authorization": "Bearer hook-secret"}, http.StatusAccepted},
+		{"github signature", "/hooks/deploy", map[string]string{"X-Hub-Signature-256": sig, "X-GitHub-Event": "push"}, http.StatusAccepted},
+	}
+	for _, tc := range cases {
+		if rec := post(tc.path, body, tc.headers); rec.Code != tc.want {
+			t.Errorf("%s: HTTP %d, want %d: %s", tc.name, rec.Code, tc.want, rec.Body.String())
+		}
+	}
+
+	runs, _ := srv.store.ListRuns(context.Background(), store.RunFilter{Automation: "deploy"})
+	if len(runs) != 2 || runs[0].TriggerType != "webhook" {
+		t.Fatalf("runs = %+v", runs)
+	}
+	data := string(runs[0].TriggerData)
+	if !strings.Contains(data, `"x-github-event":"push"`) || strings.Contains(data, "hook-secret") || strings.Contains(data, sig) {
+		t.Fatalf("trigger data: %s", data)
+	}
+
+	// The queued run executes with the payload available as trigger.json.
+	srv.execute(context.Background(), &runs[0], "test")
+	steps, _ := srv.store.ListSteps(context.Background(), runs[0].ID)
+	if len(steps) != 1 || !strings.Contains(steps[0].Logs, "ref=refs/heads/main") {
+		t.Fatalf("steps = %+v", steps)
+	}
+
+	_ = srv.store.SetEnabled(context.Background(), "deploy", false)
+	if rec := post("/hooks/deploy", body, map[string]string{"Authorization": "Bearer hook-secret"}); rec.Code != http.StatusConflict {
+		t.Fatalf("paused automation: HTTP %d", rec.Code)
+	}
+}
+
+func TestShellStepsGoThroughTheRunner(t *testing.T) {
+	cfg := testConfig(t)
+	writeAutomation(t, cfg.AutomationsDir, "where", `apiVersion: pendolo/v1
+kind: Automation
+metadata: { name: where }
+triggers: [ { manual: {} } ]
+steps:
+  - { id: who, type: shell, run: "echo ran-by-$RUNNER_MARK" }
+`)
+	// The runner process has its own environment; scripts never see the server's.
+	var calls atomic.Int32
+	inner := runner.Handler{Root: cfg.AutomationsDir, Token: "0123456789abcdef", Exec: markExec{&calls}}
+	rs := httptest.NewServer(inner)
+	t.Setenv("PENDOLO_SECRET_RUNNER_TOKEN", "0123456789abcdef")
+	cfg.Runner = config.Runner{URL: rs.URL, Token: "secret://runner-token"}
+
+	srv, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.store.Close()
+	if err := srv.reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	id, _, _ := srv.store.Enqueue(context.Background(), store.NewRun{Automation: "where", TriggerType: "manual"}, time.Now())
+	run, _ := srv.store.Claim(context.Background(), "w", time.Minute, time.Now())
+	if run == nil || run.ID != id {
+		t.Fatalf("claim = %+v", run)
+	}
+	srv.execute(context.Background(), run, "w")
+	steps, _ := srv.store.ListSteps(context.Background(), id)
+	if calls.Load() != 1 || len(steps) != 1 || !strings.Contains(steps[0].Logs, "ran-by-runner") {
+		t.Fatalf("calls=%d steps=%+v", calls.Load(), steps)
+	}
+	if h := srv.health(context.Background()); h.Runner != "ok" {
+		t.Fatalf("health with runner up: %+v", h)
+	}
+	rs.Close()
+	if h := srv.health(context.Background()); h.OK || h.Runner != "runner unreachable" {
+		t.Fatalf("health with runner down: %+v", h)
+	}
+}
+
+// markExec runs jobs locally with a marker in the environment, to prove
+// they went through the runner.
+type markExec struct{ calls *atomic.Int32 }
+
+func (m markExec) Exec(ctx context.Context, job runner.Job) (runner.Result, error) {
+	m.calls.Add(1)
+	job.Env["RUNNER_MARK"] = "runner"
+	return runner.Local{}.Exec(ctx, job)
 }

@@ -74,6 +74,12 @@ func (v *semantic) checkTriggers(root map[string]any) {
 	triggers, _ := root["triggers"].([]any)
 	for i, t := range triggers {
 		tm, _ := t.(map[string]any)
+		if hook, ok := tm["webhook"].(map[string]any); ok {
+			if _, hasSecret := hook["secret"]; !hasSecret {
+				v.add(SeverityWarning, "/triggers/"+strconv.Itoa(i)+"/webhook", "webhook without a secret: anyone who can reach Pendolo can start this automation; set secret: secret://<name>")
+			}
+			continue
+		}
 		s, ok := tm["schedule"].(map[string]any)
 		if !ok {
 			continue

@@ -17,6 +17,7 @@ import (
 	"github.com/enthonysclafani/automatizzatore/internal/expr"
 	"github.com/enthonysclafani/automatizzatore/internal/llm"
 	"github.com/enthonysclafani/automatizzatore/internal/manifest"
+	"github.com/enthonysclafani/automatizzatore/internal/runner"
 	"github.com/enthonysclafani/automatizzatore/internal/secrets"
 	"github.com/enthonysclafani/automatizzatore/internal/store"
 )
@@ -51,8 +52,10 @@ type Engine struct {
 	Secrets  secrets.Provider
 	HTTP     *http.Client
 	Notifier Notifier
-	Log      *slog.Logger
-	Now      func() time.Time
+	// Shell runs shell steps; nil runs them as local child processes.
+	Shell runner.Executor
+	Log   *slog.Logger
+	Now   func() time.Time
 }
 
 // Outcome summarises a finished run.
@@ -386,7 +389,12 @@ func (ex *execution) execForeach(ctx context.Context, st *manifest.Step, env exp
 	default:
 		return stepOutcome{err: fmt.Errorf("items must be a list, got %T", v)}
 	}
-	outputs := make([]any, 0, len(items))
+	concurrency := max(st.Concurrency, 1)
+	input := map[string]any{"items": len(items), "concurrency": concurrency}
+
+	// Each item gets its own copy of the environment, made before any item
+	// starts, so items running in parallel never share a map they write.
+	envs := make([]expr.Env, len(items))
 	for i, item := range items {
 		child := expr.Env{}
 		for k, x := range env {
@@ -397,19 +405,58 @@ func (ex *execution) execForeach(ctx context.Context, st *manifest.Step, env exp
 			nested[k] = x
 		}
 		child["steps"], child["item"], child["index"] = nested, item, i
-		err := ex.runSteps(ctx, st.Steps, child, path+"["+strconv.Itoa(i)+"].")
-		iteration := map[string]any{}
-		for _, s := range st.Steps {
-			if r, ok := nested[s.ID].(map[string]any); ok {
-				iteration[s.ID] = r["output"]
-			}
-		}
-		outputs = append(outputs, iteration)
-		if err != nil {
-			return stepOutcome{input: map[string]any{"items": len(items)}, output: outputs, err: fmt.Errorf("item %d: %w", i, err)}
-		}
+		envs[i] = child
 	}
-	return stepOutcome{input: map[string]any{"items": len(items)}, output: outputs}
+
+	loopCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	outputs := make([]any, len(items))
+	var (
+		errMu    sync.Mutex
+		firstErr error // the failure that stopped the loop, not the items it cancelled
+	)
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	for i := range items {
+		select {
+		case sem <- struct{}{}:
+		case <-loopCtx.Done():
+		}
+		if loopCtx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			err := ex.runSteps(loopCtx, st.Steps, envs[i], path+"["+strconv.Itoa(i)+"].")
+			nested := envs[i]["steps"].(map[string]any)
+			iteration := map[string]any{}
+			for _, s := range st.Steps {
+				if r, ok := nested[s.ID].(map[string]any); ok {
+					iteration[s.ID] = r["output"]
+				}
+			}
+			outputs[i] = iteration
+			if err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("item %d: %w", i, err)
+				}
+				errMu.Unlock()
+				stop() // the first failure stops the other items
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return stepOutcome{input: input, output: outputs, err: firstErr}
+	}
+	if err := ctx.Err(); err != nil {
+		return stepOutcome{input: input, output: outputs, err: err}
+	}
+	return stepOutcome{input: input, output: outputs}
 }
 
 func (ex *execution) finishStep(seq int, status string, attempts int, o stepOutcome) {

@@ -366,3 +366,41 @@ func TestCancelledOnShutdown(t *testing.T) {
 		t.Fatalf("outcome %+v", out)
 	}
 }
+
+func TestForeachConcurrency(t *testing.T) {
+	h := newHarness(t)
+	start := time.Now()
+	out, _, steps := h.run(head+`
+  - id: each
+    type: foreach
+    items: "${[1, 2, 3, 4]}"
+    concurrency: 4
+    steps:
+      - { id: nap, type: shell, run: "sleep 0.4; echo $N", env: { N: "${item}" } }
+`, nil)
+	if out.Status != store.RunSucceeded {
+		t.Fatalf("outcome %+v", out)
+	}
+	if took := time.Since(start); took > 1200*time.Millisecond {
+		t.Fatalf("4 items of 0.4s with concurrency 4 took %s", took)
+	}
+	if s := stepByPath(steps, "each[3].nap"); strings.TrimSpace(s.Logs) != "4" {
+		t.Fatalf("item 3: %+v", s)
+	}
+
+	h2 := newHarness(t)
+	out2, run2, steps2 := h2.run(head+`
+  - id: each
+    type: foreach
+    items: "${[1, 2, 3, 4, 5, 6]}"
+    concurrency: 2
+    steps:
+      - { id: check, type: shell, run: "test \"$N\" != 2", env: { N: "${item}" } }
+`, nil)
+	if out2.Status != store.RunFailed || !strings.Contains(run2.Error, "item 1") {
+		t.Fatalf("outcome %+v %q", out2, run2.Error)
+	}
+	if len(steps2) >= 7 {
+		t.Fatalf("a failure did not stop the remaining items: %d steps recorded", len(steps2))
+	}
+}

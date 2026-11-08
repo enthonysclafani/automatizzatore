@@ -81,7 +81,11 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 		level = slog.LevelInfo
 	}
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level}))
-	eng := server.NewEngine(cfg, st, log)
+	// A run started by hand executes scripts here, in the foreground.
+	eng, err := server.NewEngine(cfg, st, log, false)
+	if err != nil {
+		return fail(stderr, err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

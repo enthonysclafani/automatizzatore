@@ -28,6 +28,7 @@ const usage = `pendolo: automations that keep running.
 
 Usage:
   pendolo server                     Run the scheduler, the workers and the health endpoint.
+  pendolo runner                     Run shell steps for a server, isolated from it.
   pendolo run <folder|name>          Run an automation once, now, and show what happened.
   pendolo trigger <name>             Queue a run for the server to pick up.
   pendolo list                       List automations and their state.
@@ -58,6 +59,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "server":
 		return cmdServer(args[1:], stdout, stderr)
+	case "runner":
+		return cmdRunner(args[1:], stdout, stderr)
 	case "run":
 		return cmdRun(args[1:], stdout, stderr)
 	case "trigger":
