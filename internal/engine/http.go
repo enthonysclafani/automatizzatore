@@ -63,6 +63,11 @@ func (ex *execution) execHTTP(ctx context.Context, st *manifest.Step, env expr.E
 		input["headers"] = names // names only: values are often credentials
 	}
 
+	if ex.dry && method != http.MethodGet && method != http.MethodHead {
+		return stepOutcome{input: input, output: map[string]any{"status": 0, "ok": true, "body": "", "dryRun": true},
+			logs: dryNote + ": " + method + " requests can change things"}
+	}
+
 	httpReq, err := http.NewRequestWithContext(ctx, method, rawURL, body)
 	if err != nil {
 		return stepOutcome{input: input, err: err}

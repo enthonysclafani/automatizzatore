@@ -341,7 +341,7 @@ func (a *API) overview(w http.ResponseWriter, r *http.Request, _ *principal, ws 
 		a.internalError(w, err)
 		return
 	}
-	failures, err := a.Store.ListRuns(ctx, store.RunFilter{Workspace: ws, Status: store.RunFailed, Limit: 5})
+	failures, err := a.Store.ListRuns(ctx, store.RunFilter{Workspace: ws, Status: store.RunFailed, Limit: 5, NoDryRuns: true})
 	if err != nil {
 		a.internalError(w, err)
 		return
@@ -359,8 +359,14 @@ func (a *API) overview(w http.ResponseWriter, r *http.Request, _ *principal, ws 
 		a.internalError(w, err)
 		return
 	}
+	proposed, err := a.Store.CountProposedDrafts(ctx, ws)
+	if err != nil {
+		a.internalError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"waitingApprovals": waiting,
+		"proposedDrafts":   proposed,
 		"health":           a.Health(ctx),
 		"automations":      map[string]int{"total": counts["total"], "active": counts["active"], "paused": counts["paused"], "invalid": counts["invalid"]},
 		"runs24h":          runs,

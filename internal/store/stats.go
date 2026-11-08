@@ -18,11 +18,14 @@ type RunCounts struct {
 	Queued        int `json:"-"`
 }
 
-// CountRuns counts the runs of a workspace queued since a time.
+// TriggerDryRun is the trigger type of dry runs, which statistics leave out.
+const TriggerDryRun = "dry_run"
+
+// CountRuns counts the runs of a workspace queued since a time, dry runs aside.
 func (s *Store) CountRuns(ctx context.Context, workspace string, since time.Time) (RunCounts, error) {
 	var c RunCounts
 	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*), SUM(anomalies > 0) FROM runs
-		WHERE workspace = ? AND queued_at >= ? GROUP BY status`, workspace, ts(since))
+		WHERE workspace = ? AND queued_at >= ? AND trigger_type != ? GROUP BY status`, workspace, ts(since), TriggerDryRun)
 	if err != nil {
 		return c, err
 	}
@@ -62,7 +65,7 @@ type DayStat struct {
 func (s *Store) DailyRuns(ctx context.Context, workspace string, days int, now time.Time) ([]DayStat, error) {
 	start := now.UTC().Truncate(24*time.Hour).AddDate(0, 0, -(days - 1))
 	rows, err := s.db.QueryContext(ctx, `SELECT substr(queued_at, 1, 10) AS day, SUM(status = ?), SUM(status = ?), SUM(cost_eur)
-		FROM runs WHERE workspace = ? AND queued_at >= ? GROUP BY day`, RunSucceeded, RunFailed, workspace, ts(start))
+		FROM runs WHERE workspace = ? AND queued_at >= ? AND trigger_type != ? GROUP BY day`, RunSucceeded, RunFailed, workspace, ts(start), TriggerDryRun)
 	if err != nil {
 		return nil, err
 	}
@@ -85,13 +88,19 @@ func (s *Store) DailyRuns(ctx context.Context, workspace string, days int, now t
 	return out, rows.Err()
 }
 
-// RunCostSince sums run costs of a workspace since a time.
+// RunCostSince sums the spending of a workspace since a time: runs and
+// the AI builder.
 func (s *Store) RunCostSince(ctx context.Context, workspace string, since time.Time) (float64, error) {
 	var total float64
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_eur), 0) FROM runs WHERE workspace = ? AND queued_at >= ?`,
-		workspace, ts(since)).Scan(&total)
+	err := s.db.QueryRowContext(ctx, `SELECT
+		(SELECT COALESCE(SUM(cost_eur), 0) FROM runs WHERE workspace = ? AND queued_at >= ?) +
+		(SELECT COALESCE(SUM(cost_eur), 0) FROM builder_calls WHERE workspace = ? AND created_at >= ?)`,
+		workspace, ts(since), workspace, ts(since)).Scan(&total)
 	return total, err
 }
+
+// BuilderAutomation names the AI builder's spending in cost breakdowns.
+const BuilderAutomation = "(AI builder)"
 
 // AutomationCost is the spending of one automation.
 type AutomationCost struct {
@@ -102,8 +111,12 @@ type AutomationCost struct {
 
 // CostByAutomation sums run costs per automation since a time.
 func (s *Store) CostByAutomation(ctx context.Context, workspace string, since time.Time) ([]AutomationCost, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT automation, SUM(cost_eur), COUNT(*) FROM runs
-		WHERE workspace = ? AND queued_at >= ? GROUP BY automation ORDER BY SUM(cost_eur) DESC, automation`, workspace, ts(since))
+	rows, err := s.db.QueryContext(ctx, `SELECT automation, SUM(cost), SUM(n) FROM (
+			SELECT automation, SUM(cost_eur) AS cost, COUNT(*) AS n FROM runs
+			WHERE workspace = ? AND queued_at >= ? GROUP BY automation
+			UNION ALL
+			SELECT ?, SUM(cost_eur), 0 FROM builder_calls WHERE workspace = ? AND created_at >= ? HAVING COUNT(*) > 0)
+		GROUP BY automation ORDER BY SUM(cost) DESC, automation`, workspace, ts(since), BuilderAutomation, workspace, ts(since))
 	if err != nil {
 		return nil, err
 	}
@@ -132,9 +145,14 @@ type ModelCost struct {
 
 // CostByModel sums model calls of a workspace since a time.
 func (s *Store) CostByModel(ctx context.Context, workspace string, since time.Time) ([]ModelCost, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT c.provider, c.model, SUM(c.cost_eur), SUM(c.input_tokens), SUM(c.output_tokens),
-		COUNT(*), MIN(c.price_known) FROM llm_calls c JOIN runs r ON r.id = c.run_id
-		WHERE r.workspace = ? AND c.created_at >= ? GROUP BY c.provider, c.model ORDER BY SUM(c.cost_eur) DESC`, workspace, ts(since))
+	rows, err := s.db.QueryContext(ctx, `SELECT provider, model, SUM(cost_eur), SUM(input_tokens), SUM(output_tokens),
+		COUNT(*), MIN(price_known) FROM (
+			SELECT c.provider, c.model, c.cost_eur, c.input_tokens, c.output_tokens, c.price_known
+			FROM llm_calls c JOIN runs r ON r.id = c.run_id WHERE r.workspace = ? AND c.created_at >= ?
+			UNION ALL
+			SELECT provider, model, cost_eur, input_tokens, output_tokens, price_known
+			FROM builder_calls WHERE workspace = ? AND created_at >= ?)
+		GROUP BY provider, model ORDER BY SUM(cost_eur) DESC`, workspace, ts(since), workspace, ts(since))
 	if err != nil {
 		return nil, err
 	}

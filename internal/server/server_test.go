@@ -388,3 +388,35 @@ steps:
 		t.Fatalf("message processed twice: %d runs", len(runs))
 	}
 }
+
+// Versions found in the folder are kept, so the history is complete even
+// for automations edited by hand.
+func TestReloadKeepsFolderVersions(t *testing.T) {
+	cfg := testConfig(t)
+	body := "apiVersion: pendolo/v1\nkind: Automation\nmetadata: { name: hand }\ntriggers: [ { manual: {} } ]\nsteps: [ { id: a, type: shell, run: \"echo SCHEDULE\" } ]\n"
+	writeAutomation(t, cfg.AutomationsDir, "hand", strings.Replace(body, "SCHEDULE", "one", 1))
+	srv, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.store.Close()
+	ctx := context.Background()
+	if err := srv.reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	writeAutomation(t, cfg.AutomationsDir, "hand", strings.Replace(body, "SCHEDULE", "two", 1))
+	if err := srv.reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.reload(ctx); err != nil { // unchanged: no new version
+		t.Fatal(err)
+	}
+	versions, err := srv.store.ListVersions(ctx, "hand")
+	if err != nil || len(versions) != 2 || versions[0].Source != store.VersionFolder {
+		t.Fatalf("versions = %+v, %v", versions, err)
+	}
+	v, _ := srv.store.GetVersion(ctx, "hand", srv.automations()["hand"].Hash)
+	if v == nil || !strings.Contains(v.Files["automation.yaml"], "echo two") {
+		t.Fatalf("current version = %+v", v)
+	}
+}

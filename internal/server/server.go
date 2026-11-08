@@ -14,12 +14,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/enthonysclafani/automatizzatore/internal/api"
 	"github.com/enthonysclafani/automatizzatore/internal/auth"
+	"github.com/enthonysclafani/automatizzatore/internal/builder"
 	"github.com/enthonysclafani/automatizzatore/internal/config"
 	"github.com/enthonysclafani/automatizzatore/internal/connectors"
 	"github.com/enthonysclafani/automatizzatore/internal/engine"
@@ -59,10 +61,11 @@ type Server struct {
 	hub    *connectors.Hub
 	api    *api.API
 
-	mu      sync.RWMutex
-	snap    registry.Snapshot
-	running atomic.Int32
-	started time.Time
+	mu       sync.RWMutex
+	reloadMu sync.Mutex
+	snap     registry.Snapshot
+	running  atomic.Int32
+	started  time.Time
 }
 
 // DBPath is where the database lives inside the data folder.
@@ -147,6 +150,9 @@ func New(cfg config.Config, log *slog.Logger) (*Server, error) {
 		Store: st, Vault: v, Config: cfg, Log: log, Hub: s.hub,
 		Snapshot: func() registry.Snapshot { s.mu.RLock(); defer s.mu.RUnlock(); return s.snap },
 		Health:   s.health,
+		Engine:   eng,
+		Builder:  NewBuilder(cfg, eng),
+		Reload:   func(ctx context.Context) error { return s.reload(ctx) },
 		Wake: func() {
 			select {
 			case s.wake <- struct{}{}:
@@ -323,8 +329,23 @@ func (s *Server) execute(ctx context.Context, run *store.Run, worker string) {
 	s.engine.Execute(ctx, run, a)
 }
 
+// NewBuilder returns the AI builder, or nil when it is disabled or its
+// model is not configured.
+func NewBuilder(cfg config.Config, eng *engine.Engine) *builder.Builder {
+	model := cfg.Builder.Model
+	if cfg.Builder.Disabled || model == "" {
+		return nil
+	}
+	if _, ok := cfg.Models[model]; !ok && !strings.Contains(model, "/") {
+		return nil
+	}
+	return &builder.Builder{LLM: eng.LLM, Model: model, TempDir: filepath.Join(cfg.DataDir, "tmp")}
+}
+
 // reload re-reads the automations folder and records what it found.
 func (s *Server) reload(ctx context.Context) error {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
 	snap, err := registry.Load(s.cfg.AutomationsDir)
 	if err != nil {
 		s.log.Error("load automations", "dir", s.cfg.AutomationsDir, "err", err)
@@ -342,6 +363,9 @@ func (s *Server) reload(ctx context.Context) error {
 		if err := s.store.UpsertAutomation(ctx, store.Automation{Name: name, Workspace: a.Workspace(), Path: a.Dir, Hash: a.Hash, Valid: true}, now); err != nil {
 			return err
 		}
+		if old, ok := prev[name]; !ok || old.Hash != a.Hash {
+			s.recordVersion(ctx, a, now)
+		}
 	}
 	for _, inv := range snap.Invalid {
 		problems, _ := json.Marshal(inv.Problems)
@@ -357,6 +381,23 @@ func (s *Server) reload(ctx context.Context) error {
 	s.snap = snap
 	s.mu.Unlock()
 	return nil
+}
+
+// recordVersion keeps a copy of an automation version found in the
+// folder, so its history is complete even when edited by hand.
+func (s *Server) recordVersion(ctx context.Context, a engine.Automation, now time.Time) {
+	if known, err := s.store.HasVersion(ctx, a.Name, a.Hash); err != nil || known {
+		return
+	}
+	files, err := builder.ReadFolder(a.Dir)
+	if err != nil {
+		s.log.Warn("automation version not kept in history", "automation", a.Name, "err", err)
+		return
+	}
+	if _, err := s.store.AddVersion(ctx, store.Version{Automation: a.Name, Hash: a.Hash, Workspace: a.Workspace(),
+		Files: files, Source: store.VersionFolder}, now); err != nil {
+		s.log.Error("record automation version", "automation", a.Name, "err", err)
+	}
 }
 
 func (s *Server) recover(ctx context.Context) {

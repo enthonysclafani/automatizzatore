@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +32,33 @@ type env struct {
 	srv   *httptest.Server
 	store *store.Store
 	now   time.Time
+	// autos is the automations folder; snap what was last loaded from it.
+	autos  string
+	snapMu sync.Mutex
+	snap   registry.Snapshot
+}
+
+func (e *env) snapshot() registry.Snapshot {
+	e.snapMu.Lock()
+	defer e.snapMu.Unlock()
+	return e.snap
+}
+
+// reload re-reads the automations folder, as the server does.
+func (e *env) reload(ctx context.Context) error {
+	snap, err := registry.Load(e.autos)
+	if err != nil {
+		return err
+	}
+	for name, a := range snap.Valid {
+		if err := e.store.UpsertAutomation(ctx, store.Automation{Name: name, Workspace: a.Workspace(), Path: a.Dir, Hash: a.Hash, Valid: true}, time.Now()); err != nil {
+			return err
+		}
+	}
+	e.snapMu.Lock()
+	e.snap = snap
+	e.snapMu.Unlock()
+	return nil
 }
 
 func manifestIn(ws, name string) string {
@@ -55,23 +83,18 @@ func newEnv(t *testing.T) *env {
 		_ = os.MkdirAll(filepath.Join(autos, name), 0o755)
 		_ = os.WriteFile(filepath.Join(autos, name, "automation.yaml"), []byte(manifestIn(ws, name)), 0o644)
 	}
-	snap, err := registry.Load(autos)
-	if err != nil || len(snap.Valid) != 2 {
-		t.Fatalf("load: %v %+v", err, snap.Invalid)
-	}
-	ctx := context.Background()
-	for name, a := range snap.Valid {
-		if err := st.UpsertAutomation(ctx, store.Automation{Name: name, Workspace: a.Workspace(), Path: a.Dir, Hash: a.Hash, Valid: true}, time.Now()); err != nil {
-			t.Fatal(err)
-		}
+	e := &env{t: t, store: st, now: time.Now(), autos: autos}
+	if err := e.reload(context.Background()); err != nil || len(e.snap.Valid) != 2 {
+		t.Fatalf("load: %v %+v", err, e.snap.Invalid)
 	}
 	v, _ := vault.New(make([]byte, 32))
 	cfg := config.Defaults()
-	e := &env{t: t, store: st, now: time.Now()}
+	cfg.DataDir, cfg.AutomationsDir = dir, autos
 	e.api = New(&API{
 		Store: st, Vault: v, Config: cfg, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Hub:      &connectors.Hub{Store: st, Vault: v, PublicURL: "http://localhost:8080", AllowPrivateFetch: true},
-		Snapshot: func() registry.Snapshot { return snap },
+		Snapshot: e.snapshot,
+		Reload:   e.reload,
 		Health:   func(context.Context) Health { return Health{OK: true, Version: "test", Runner: "local"} },
 		Now:      func() time.Time { return e.now },
 	})
@@ -246,6 +269,9 @@ func TestViewerSeesOnlyOwnWorkspace(t *testing.T) {
 	runB, _, _ := e.store.Enqueue(ctx, store.NewRun{Automation: "beta", Workspace: "ws-b", TriggerType: "manual"}, e.now)
 	runA, _, _ := e.store.Enqueue(ctx, store.NewRun{Automation: "alpha", Workspace: "ws-a", TriggerType: "manual"}, e.now)
 	owner.expect("PUT", "/api/v1/workspaces/ws-b/secrets/db-password", map[string]string{"value": "s3cret!"}, 204)
+	var drB struct{ ID string }
+	owner.do("POST", "/api/v1/workspaces/ws-b/drafts", map[string]string{"template": "site-checks"}, &drB)
+	draftB := drB.ID
 
 	viewer := e.userWithRole(owner, "viewer@example.com", "ws-a", "viewer")
 
@@ -276,11 +302,14 @@ func TestViewerSeesOnlyOwnWorkspace(t *testing.T) {
 		"/api/v1/workspaces/ws-b/runs", "/api/v1/workspaces/ws-b/runs/" + runB, "/api/v1/workspaces/ws-b/costs",
 		"/api/v1/workspaces/ws-b/secrets", "/api/v1/workspaces/nope/overview",
 		"/api/v1/workspaces/ws-b/connections", "/api/v1/workspaces/ws-b/approvals", "/api/v1/workspaces/ws-b/settings",
+		"/api/v1/workspaces/ws-b/builder", "/api/v1/workspaces/ws-b/drafts", "/api/v1/workspaces/ws-b/drafts/" + draftB,
+		"/api/v1/workspaces/ws-b/automations/beta/versions", "/api/v1/workspaces/ws-b/automations/beta/versions/x",
 	} {
 		viewer.expect("GET", path, nil, 404)
 	}
 	// A run of ws-b through the ws-a path, and an automation of ws-b through ws-a.
 	viewer.expect("GET", "/api/v1/workspaces/ws-a/runs/"+runB, nil, 404)
+	viewer.expect("GET", "/api/v1/workspaces/ws-a/automations/beta/versions", nil, 404)
 	viewer.expect("GET", "/api/v1/workspaces/ws-a/automations/beta", nil, 404)
 
 	// Read-only in their own workspace.
@@ -295,6 +324,11 @@ func TestViewerSeesOnlyOwnWorkspace(t *testing.T) {
 	viewer.expect("PUT", "/api/v1/workspaces/ws-a/connections/slack", map[string]any{"kind": "slack", "config": map[string]any{}}, 403)
 	viewer.expect("POST", "/api/v1/workspaces/ws-a/connections/slack/test", nil, 403)
 	viewer.expect("PATCH", "/api/v1/workspaces/ws-a/settings", map[string]string{"maxAutonomy": "auto"}, 403)
+	viewer.expect("GET", "/api/v1/workspaces/ws-a/automations/alpha/versions", nil, 200)
+	viewer.expect("GET", "/api/v1/workspaces/ws-a/builder", nil, 403)
+	viewer.expect("GET", "/api/v1/workspaces/ws-a/drafts", nil, 403)
+	viewer.expect("POST", "/api/v1/workspaces/ws-a/drafts", map[string]string{"template": "site-checks"}, 403)
+	viewer.expect("POST", "/api/v1/workspaces/ws-a/drafts/"+draftB+"/activate", nil, 403)
 	// And no owner endpoints.
 	for _, path := range []string{"/api/v1/users", "/api/v1/system", "/api/v1/audit"} {
 		viewer.expect("GET", path, nil, 403)

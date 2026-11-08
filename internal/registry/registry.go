@@ -87,7 +87,7 @@ func Load(dir string) (Snapshot, error) {
 // LoadFolder loads one automation folder.
 func LoadFolder(folder string) (engine.Automation, *Invalid) {
 	path := filepath.Join(folder, manifest.FileName)
-	hash, herr := hashFolder(folder)
+	hash, herr := HashFolder(folder)
 	res, err := manifest.ValidateFile(path)
 	if err == nil && herr != nil {
 		err = herr
@@ -121,9 +121,9 @@ func guessWorkspace(path string) string {
 	return store.DefaultWorkspace
 }
 
-// hashFolder fingerprints every file of an automation, so an edited prompt
+// HashFolder fingerprints every file of an automation, so an edited prompt
 // or script counts as a new version.
-func hashFolder(folder string) (string, error) {
+func HashFolder(folder string) (string, error) {
 	root, err := os.OpenRoot(folder)
 	if err != nil {
 		return "", err
@@ -134,10 +134,13 @@ func hashFolder(folder string) (string, error) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			if path != "." && d.Name()[0] == '.' {
+		if path != "." && d.Name()[0] == '.' {
+			if d.IsDir() {
 				return fs.SkipDir
 			}
+			return nil // hidden files are not part of the automation
+		}
+		if d.IsDir() {
 			return nil
 		}
 		_, _ = io.WriteString(h, path+"\x00")

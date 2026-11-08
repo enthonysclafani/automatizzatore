@@ -80,7 +80,8 @@ export interface Run {
   automation: string;
   workspace: string;
   manifestHash: string;
-  triggerType: "schedule" | "webhook" | "manual" | "email";
+  /** "dry_run": a test of a builder draft; only reads happened (see Draft). */
+  triggerType: "schedule" | "webhook" | "manual" | "email" | "dry_run";
   triggerKey?: string;
   scheduledFor?: string;
   triggerData: unknown;
@@ -184,10 +185,12 @@ export interface Overview {
   queued: number;
   /** Pending approvals in this workspace. */
   waitingApprovals: number;
+  /** Builder drafts proposed and waiting for an admin to activate them. */
+  proposedDrafts: number;
   costMonthEur: number;
   /** Last 14 days, oldest first, every day present (zeros included). Dates are YYYY-MM-DD. */
   daily: { date: string; succeeded: number; failed: number; costEur: number }[];
-  /** Up to 5 most recent failed runs. */
+  /** Up to 5 most recent failed runs, dry runs left out. runs24h and daily leave dry runs out too. */
   recentFailures: Run[];
   /** Up to 10 next scheduled runs. */
   upcoming: { automation: string; at: string }[];
@@ -376,4 +379,113 @@ export interface WorkspaceSettings {
   name: string;
   /** The most autonomy any automation in this workspace gets, whatever its manifest says. */
   maxAutonomy: Autonomy;
+}
+
+// ---- AI builder (phase 4) ----
+
+/** GET /workspaces/{ws}/builder: builder role and up. */
+export interface BuilderStatus {
+  /** False when no model is configured; templates and hand edits still work. */
+  enabled: boolean;
+  model?: string;
+  /** Why the builder is off and how to turn it on. */
+  reason?: string;
+  templates: { name: string; description: string }[];
+  /** Whether the caller may activate drafts (admin and owner). */
+  canActivate: boolean;
+}
+
+/** open: being written. proposed: waiting for an admin. activated and discarded are final. */
+export type DraftStatus = "open" | "proposed" | "activated" | "discarded";
+
+/** A finding about a draft. file is the file it is in (e.g. "automation.yaml"); path a JSON pointer in the manifest. */
+export interface DraftProblem extends Problem {
+  file?: string;
+}
+
+/** "event": something that happened to the draft (manual edit, dry run, proposal, activation), written by Pendolo. */
+export interface DraftMessage {
+  id: number;
+  role: "user" | "assistant" | "event";
+  author?: string;
+  text: string;
+  /** The draft's hash after this message: each reply points to a version of the files. */
+  hash?: string;
+  createdAt: string;
+}
+
+export interface Draft {
+  id: string;
+  workspace: string;
+  /** metadata.name of the draft; "" until the model writes one. */
+  automation: string;
+  /** Set when the draft edits an existing automation: its name and the version it started from. */
+  baseName?: string;
+  baseHash?: string;
+  /** Files by path ("automation.yaml", "prompts/x.md"). Empty in list responses. */
+  files: Record<string, string> | null;
+  problems: DraftProblem[];
+  /** Hash of the files, as versions and runs show it. */
+  hash: string;
+  status: DraftStatus;
+  /** The latest dry run, and the draft hash it ran on (stale when it differs from hash). */
+  dryRunId?: string;
+  dryRunHash?: string;
+  /** Spent on model calls by the builder for this draft. */
+  costEur: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  proposedBy?: string;
+  proposedAt?: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  comment?: string;
+}
+
+/** GET /drafts/{id} and every draft action. */
+export interface DraftDetail extends Draft {
+  files: Record<string, string>;
+  messages: DraftMessage[];
+  /** Files of the version the draft edits, for a diff. Absent for a new automation. */
+  baseFiles?: Record<string, string>;
+  /** The automation's version now; differs from baseHash when it changed since the draft started (activation then fails with 409 stale). */
+  currentHash?: string;
+  dryRun?: Run;
+  /** True while the builder works on the draft (another message is refused with 409 busy). */
+  busy: boolean;
+}
+
+/** POST /drafts. Give message (needs the builder), template, or automation (optionally with version, to restore it). message may combine with template or automation. */
+export interface CreateDraftInput {
+  message?: string;
+  template?: string;
+  automation?: string;
+  version?: string;
+}
+
+export interface DryRunStarted {
+  runId: string;
+  /** e.g. which email it used as sample input, or why there is none. */
+  note?: string;
+}
+
+export interface AutomationVersion {
+  automation: string;
+  hash: string;
+  workspace: string;
+  /** "builder": activated from a draft; "folder": found in the automations folder (edited by hand or first seen). */
+  source: "builder" | "folder";
+  draftId?: string;
+  activatedBy?: string;
+  createdAt: string;
+  /** Only in GET .../versions/{hash}. */
+  files?: Record<string, string>;
+}
+
+export interface VersionList {
+  /** The version running now. */
+  current: string;
+  /** Newest first. */
+  versions: AutomationVersion[];
 }

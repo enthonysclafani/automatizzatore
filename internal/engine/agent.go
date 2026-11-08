@@ -178,6 +178,9 @@ func (ex *execution) agentTool(ctx context.Context, level string, b *connectors.
 		}
 		b = alt
 	}
+	if ex.dry && b.Risk != connectors.RiskRead {
+		return fmt.Sprintf("Dry run: %s was not called. Carry on as if it succeeded.", b.Name), false
+	}
 	// The model's arguments are used as they are: secret:// in them is text.
 	out, err := b.Call(ctx, tc.Input)
 	if err != nil {

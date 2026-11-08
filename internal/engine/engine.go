@@ -132,7 +132,18 @@ type execution struct {
 	approved map[string]decision
 	// paused is set when the run stopped to wait for an approval.
 	paused *store.Approval
+	// dry is set for dry runs: only reads happen, everything else is recorded.
+	dry bool
 }
+
+// TriggerDryRun is the trigger type of a dry run. A dry run executes reads
+// (read actions, GET requests, model calls) and records what every other
+// step would do without doing it: no writes, no messages, no scripts, no
+// waiting for approvals, no notifications.
+const TriggerDryRun = store.TriggerDryRun
+
+// dryNote is the log line of a step a dry run did not really execute.
+const dryNote = "dry run: not executed"
 
 // Execute runs a, recording progress under run, which must already be in
 // the running state. ctx cancellation (shutdown) marks the run cancelled.
@@ -151,7 +162,8 @@ func (e *Engine) Execute(ctx context.Context, run *store.Run, a Automation) Outc
 	if e.SecretsFor != nil {
 		provider = e.SecretsFor(a, run.ID)
 	}
-	ex := &execution{e: e, run: run, a: a, resolver: secrets.NewResolver(provider), approved: map[string]decision{}}
+	ex := &execution{e: e, run: run, a: a, resolver: secrets.NewResolver(provider), approved: map[string]decision{},
+		dry: run.TriggerType == TriggerDryRun}
 	if m.Budget != nil {
 		ex.maxCost = m.Budget.MaxCostEur
 	}
@@ -213,7 +225,7 @@ func (e *Engine) Execute(ctx context.Context, run *store.Run, a Automation) Outc
 	e.log().Info("run finished", "automation", a.Name, "run", run.ID, "status", out.Status,
 		"anomalies", out.Anomalies, "costEur", out.CostEur, "error", out.Error)
 
-	if e.Notifier != nil {
+	if e.Notifier != nil && !ex.dry {
 		if final, gerr := e.Store.GetRun(rec, run.ID); gerr == nil {
 			e.Notifier.Notify(rec, a, final)
 		}

@@ -6,7 +6,8 @@
 cd deploy
 mkdir -p automations secrets
 cp pendolo.example.yaml pendolo.yaml        # then edit models and providers
-cp -r ../templates/site-checks automations/ # start from a template
+cp -r ../templates/site-checks automations/ # start from a template (or from the dashboard's Builder)
+sudo chown -R 10001:10001 automations      # the server writes activated drafts here
 openssl rand -hex 24 > secrets/runner-token
 openssl rand -base64 32 > secrets/pendolo-master-key
 printf '%s' 'https://hooks.slack.com/services/...' > secrets/alerts-webhook
@@ -18,7 +19,7 @@ Compose starts two containers from the same image:
 
 | Container | Does | Sees |
 | --- | --- | --- |
-| `pendolo` | Scheduler, queue, model calls, notifications, history, `/healthz`, webhooks | Database, configuration, secrets, automations (read-only) |
+| `pendolo` | Scheduler, queue, model calls, notifications, history, `/healthz`, webhooks, the AI builder | Database, configuration, secrets, automations (read-write, to activate drafts) |
 | `runner` | Executes the scripts of shell steps | Automations (read-only) and its token; read-only file system, no Linux capabilities |
 
 A script that misbehaves can only reach what the runner can. If the runner is down, `/healthz` reports it and shell steps fail with "runner unreachable". The image includes `bash`, `curl`, `jq`, `openssl` and `ssh` for scripts, runs as a non-root user, and has a Docker health check. The database lives in the `pendolo-data` volume. `deploy/smoke-test.sh` checks the whole stack; CI runs it on every change.
@@ -27,8 +28,9 @@ A script that misbehaves can only reach what the runner can. If the runner is do
 
 Open `http://localhost:8080`. The first time, the dashboard asks for the setup token printed in the server log (`docker compose logs pendolo | grep setupToken`) and creates the owner. Then:
 
+- **Builder**: describe an automation in plain language, or start from a template or an existing automation; see its files, problems and changes; test it with a dry run; propose it; activate it. See below.
 - **Overview**: health, automations, runs of the last 24 hours, cost this month, 14 days of runs, recent failures, upcoming runs.
-- **Automations**: state, triggers, last and next run; run now, pause, resume; the manifest as written.
+- **Automations**: state, triggers, last and next run; run now, pause, resume; the manifest as written; every version it has had, with the differences, and edit or restore through the builder.
 - **Runs**: every run, filterable; each run step by step with logs, inputs, outputs, errors, and every model call with prompt, answer, tokens and cost.
 - **Costs**: spending per day, per automation and per model.
 - **Approvals**: runs waiting for a person, with what will happen if approved; approve or reject with a comment.
@@ -46,11 +48,21 @@ An automation belongs to the workspace named in its `metadata.workspace` (`defau
 | --- | --- |
 | viewer | See automations, runs and costs |
 | approver | Also approve or reject runs that wait for a person |
-| builder | Also run, pause and resume automations, and see secret names |
-| admin | Also approve, manage secrets, connections, members and settings, and read the audit log |
+| builder | Also run, pause and resume automations, see secret names, and write, dry-run and propose automations with the builder |
+| admin | Also approve, activate builder drafts, manage secrets, connections, members and settings, and read the audit log |
 | owner (instance) | Everything, in every workspace, plus users and workspaces |
 
 Every sign-in, change and secret read by an automation is recorded in the audit log. The API behind the dashboard is documented in [api.md](api.md); scripts use API tokens from the Account page.
+
+### The AI builder
+
+The builder turns a request such as "every Monday at 9, find article ideas, check them on OpenSEO, write them to a Google Doc and tell me on Slack" into an automation folder. It never runs or activates anything by itself:
+
+1. **Draft.** The model writes the files, knowing the format, the templates, and the workspace's connections, actions, secret names and models. Pendolo checks every file: the schema, the steps, that connections and actions exist, that secrets are referenced as `secret://` and that nothing looks like a credential. When it finds errors, the model fixes them, up to twice. Keep talking to it to change the draft, or edit the files by hand.
+2. **Dry run.** The draft runs once with only its reads for real: read actions, `GET` requests and model calls. Writes, messages, scripts and approvals are recorded as what they would do, and nobody is notified. A draft with an email trigger uses the newest matching email as input.
+3. **Propose and activate.** A builder proposes the draft; an admin (or owner) activates it, which writes its folder into the automations folder in one step. From then on the scheduler runs it like any other automation.
+
+Editing an automation works the same way, from its page: the draft starts from the current version, shows the differences, and cannot be activated if someone changed the automation in the meantime. Every version is kept, whether it came from the builder or from editing the folder by hand, and any version can be restored through a new draft. The builder needs a model (`builder.model`, `smart` by default; see [configuration.md](configuration.md)); without one, templates and hand edits still work. Its model calls appear in Costs as `(AI builder)`.
 
 ## Webhooks from the internet
 

@@ -136,6 +136,10 @@ func (ex *execution) execConnector(ctx context.Context, st *manifest.Step, env e
 		rec["draftInsteadOf"], rec["action"] = st.Action, alt.Name
 		bound = alt
 	case decideApprove:
+		if ex.dry {
+			rec["wouldWaitForApproval"] = true
+			break
+		}
 		if _, ok := ex.approved[path]; !ok {
 			return stepOutcome{input: rec, err: &needsApproval{
 				message:   fmt.Sprintf("%s wants to run %s (%s)", ex.a.Name, st.Action, bound.Risk),
@@ -143,6 +147,10 @@ func (ex *execution) execConnector(ctx context.Context, st *manifest.Step, env e
 				approvers: defaultApprovers, timeout: defaultApprovalTimeout, onTimeout: "reject",
 			}}
 		}
+	}
+	if ex.dry && bound.Risk != connectors.RiskRead {
+		return stepOutcome{input: rec, output: map[string]any{"dryRun": true, "wouldCall": bound.Name},
+			logs: fmt.Sprintf("%s: %s is a %s action", dryNote, bound.Name, bound.Risk)}
 	}
 	out, err := bound.Call(ctx, input)
 	return stepOutcome{input: rec, output: out, err: err}
@@ -171,6 +179,11 @@ func (ex *execution) execApproval(st *manifest.Step, env expr.Env, path string) 
 		onTimeout = "reject"
 	}
 	msg := expr.Text(msgV)
+	if ex.dry {
+		return stepOutcome{input: map[string]any{"message": msg, "approvers": approvers},
+			output: map[string]any{"approved": true, "by": "dry run", "dryRun": true},
+			logs:   dryNote + ": a real run waits here for " + strings.Join(approvers, " or ")}
+	}
 	return stepOutcome{input: map[string]any{"message": msg}, err: &needsApproval{
 		message: msg, detail: map[string]any{"message": msg}, approvers: approvers,
 		timeout: timeout, onTimeout: onTimeout, explicit: true,

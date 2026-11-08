@@ -25,6 +25,9 @@ Instance **owners** can do everything in every workspace. In a workspace:
 | Approve or reject (when the approval lists the role) | | yes | | yes |
 | Test connections | | | yes | yes |
 | Create, change, delete connections; workspace settings | | | | yes |
+| See automation versions | yes | yes | yes | yes |
+| Write drafts with the AI builder, dry-run and propose them | | | yes | yes |
+| Activate a draft (it starts running) | | | | yes |
 
 A user never sees a workspace they are not a member of: its endpoints answer 404. An owner's `Me.workspaces` lists every workspace, with role `owner`.
 
@@ -41,6 +44,10 @@ A user never sees a workspace they are not a member of: its endpoints answer 404
 - Connection names use lowercase letters, digits, `_` and `-`, starting with a letter (up to 63). `PUT` on an existing name replaces its settings and keeps omitted secrets; an empty secret value removes it. For MCP, `secrets` keys are header names and `secretsSet` lists the saved header names. Connections cannot be renamed.
 - `GET .../approvals` without `status` returns all approvals, newest first (at most 100); `status` can be `pending`, `approved`, `rejected` or `expired`. Approving or rejecting an approval that is no longer pending answers 409 `conflict`. Approvals that time out are decided by `timeout` at the moment Pendolo notices (within a minute of `expiresAt`), as `expired` or, with `onTimeout: approve`, `approved`.
 - Anyone whose role is listed in an approval's `approvers` can decide it, plus admins and owners.
+- Drafts: `POST .../drafts` takes `message` (asks the builder; needs a model, else 503 `builder_off`), `template`, or `automation` (to edit it; add `version` to restore an earlier one); `message` combines with the other two. Calls with a message wait for the model, often 10 to 90 seconds. One turn at a time per draft: another answers 409 `busy`. A model failure answers 502 `builder_failed` and is recorded in the conversation. `PUT .../files` replaces every file. Every change re-validates the draft into `problems`; dry runs, proposals and activation need a draft without errors (409 `draft_invalid` or `empty_draft`).
+- A draft that edits an automation keeps its name and the version it started from (`baseHash`). Activating it after the automation changed answers 409 `stale`. Activation writes the files into the automations folder in one rename: 409 `folder_exists` when a new automation would overwrite an unrelated folder, 409 `not_writable` when the server cannot write there. Activated and discarded drafts are closed (409 `draft_closed`).
+- A dry run (`triggerType: dry_run`) runs the draft's reads for real (read actions, `GET` requests, model calls) and records what every other step would do: no writes, messages, scripts, approvals or notifications. Without `triggerData`, a draft with an email trigger uses the newest matching email. Dry runs appear in the runs list but not in `Overview` counts. Their model calls cost money and count in costs; the builder's own calls appear in costs under `(AI builder)`.
+- `GET .../versions` lists every version Pendolo has seen of an automation, newest first: activated from a draft (`source: builder`) or found in the folder (`source: folder`).
 - Not available yet: cancelling a run, renaming or deleting workspaces, deleting users (disable them instead).
 
 ## Endpoints
@@ -87,6 +94,18 @@ A user never sees a workspace they are not a member of: its endpoints answer 404
 | `GET /api/v1/workspaces/{ws}/approvals?status=pending` | viewer | | `{approvals: Approval[]}` |
 | `POST /api/v1/workspaces/{ws}/approvals/{id}/approve` | listed approver role, admin | `{comment?}` | `Approval` |
 | `POST /api/v1/workspaces/{ws}/approvals/{id}/reject` | listed approver role, admin | `{comment?}` | `Approval` |
+| `GET /api/v1/workspaces/{ws}/automations/{name}/versions` | viewer | | `VersionList` |
+| `GET /api/v1/workspaces/{ws}/automations/{name}/versions/{hash}` | viewer | | `AutomationVersion` with `files` |
+| `GET /api/v1/workspaces/{ws}/builder` | builder | | `BuilderStatus` |
+| `GET /api/v1/workspaces/{ws}/drafts?status=` | builder | | `{drafts: Draft[]}` (open and proposed by default; `all` for every status) |
+| `POST /api/v1/workspaces/{ws}/drafts` | builder | `CreateDraftInput` | 201 `DraftDetail` |
+| `GET /api/v1/workspaces/{ws}/drafts/{id}` | builder | | `DraftDetail` |
+| `POST /api/v1/workspaces/{ws}/drafts/{id}/messages` | builder | `{text}` | `DraftDetail` |
+| `PUT /api/v1/workspaces/{ws}/drafts/{id}/files` | builder | `{files}` | `DraftDetail` |
+| `POST /api/v1/workspaces/{ws}/drafts/{id}/dry-run` | builder | `{triggerData?}` | 202 `DryRunStarted` |
+| `POST /api/v1/workspaces/{ws}/drafts/{id}/propose` | builder | | `DraftDetail` |
+| `POST /api/v1/workspaces/{ws}/drafts/{id}/discard` | builder | `{comment?}` | `DraftDetail` |
+| `POST /api/v1/workspaces/{ws}/drafts/{id}/activate` | admin | `{comment?}` | `DraftDetail` |
 | `GET /api/v1/workspaces/{ws}/settings` | viewer | | `WorkspaceSettings` |
 | `PATCH /api/v1/workspaces/{ws}/settings` | admin | `{name?, maxAutonomy?}` | `WorkspaceSettings` |
 | `POST /api/v1/workspaces` | owner | `{id, name}` | `WorkspaceRef` |

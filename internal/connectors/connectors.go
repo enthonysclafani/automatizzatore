@@ -134,6 +134,16 @@ var prefixKinds = map[string]string{
 	"web":         KindWebSearch,
 }
 
+// KindForPrefix returns the connection kind a built-in action prefix needs
+// ("gmail" needs "google"); ok is false for MCP connections.
+func KindForPrefix(prefix string) (kind string, ok bool) {
+	kind, ok = prefixKinds[prefix]
+	return kind, ok
+}
+
+// NeedsNoConnection reports whether an action works without a connection.
+func NeedsNoConnection(action string) bool { return action == "web.fetch" }
+
 // Resolve finds the action named "<prefix>.<action>" for a workspace. The
 // connection is the one named by connName, or else the workspace's
 // connection named like the prefix, or its only connection of the kind.

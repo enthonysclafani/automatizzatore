@@ -72,3 +72,7 @@ models:
   local:
     provider: ollama
     model: llama3.3
+
+# The AI builder of the dashboard writes automations with this model.
+builder:
+  model: smart

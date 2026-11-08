@@ -23,6 +23,8 @@ Pendolo reads `pendolo.yaml` (or the file in `$PENDOLO_CONFIG`, or `--config`). 
 | `heartbeat.url` | none | URL pinged while Pendolo is healthy; may be a `secret://` reference. |
 | `heartbeat.interval` | `5m` | How often the heartbeat is sent. |
 | `retention.runs` | `2160h` (90 days) | How long run history is kept. |
+| `builder.model` | `smart` | The model alias (or `provider/model`) the AI builder writes automations with. Use a strong model. |
+| `builder.disabled` | `false` | Turn the AI builder off; templates and hand edits in the dashboard still work. |
 | `providers` | none | Language model APIs, by name. |
 | `models` | none | Aliases used by automations (`fast`, `smart`, `local`...). |
 

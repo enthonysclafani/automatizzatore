@@ -159,6 +159,8 @@ type RunFilter struct {
 	// Before returns the runs listed after this run id (the next page).
 	Before string
 	Limit  int
+	// NoDryRuns leaves dry runs out.
+	NoDryRuns bool
 }
 
 func workspaceOr(ws string) string {
@@ -176,8 +178,9 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]Run, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+runColumns+` FROM runs
 		WHERE (? = '' OR workspace = ?) AND (? = '' OR automation = ?) AND (? = '' OR status = ?)
 		  AND (? = '' OR (queued_at, id) < (SELECT queued_at, id FROM runs WHERE id = ?))
+		  AND (? = 0 OR trigger_type != ?)
 		ORDER BY queued_at DESC, id DESC LIMIT ?`,
-		f.Workspace, f.Workspace, f.Automation, f.Automation, f.Status, f.Status, f.Before, f.Before, f.Limit)
+		f.Workspace, f.Workspace, f.Automation, f.Automation, f.Status, f.Status, f.Before, f.Before, boolInt(f.NoDryRuns), TriggerDryRun, f.Limit)
 	if err != nil {
 		return nil, err
 	}

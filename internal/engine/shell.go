@@ -52,6 +52,10 @@ func (ex *execution) execShell(ctx context.Context, st *manifest.Step, env expr.
 		input["run"] = st.Run
 	}
 
+	if ex.dry {
+		return stepOutcome{input: input, output: map[string]any{"exitCode": 0, "stdout": "", "stderr": "", "dryRun": true},
+			logs: dryNote + ": scripts can change things, so dry runs skip them"}
+	}
 	res, err := ex.e.shell().Exec(ctx, job)
 	if err != nil {
 		return stepOutcome{input: input, err: err}

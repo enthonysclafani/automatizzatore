@@ -1,7 +1,9 @@
 # Pendolo with Docker Compose: the server, plus a runner that executes the
 # scripts of shell steps in a separate, locked-down container.
 #
-#   1. Put your automations in ./automations (one folder each).
+#   1. Put your automations in ./automations (one folder each). The server
+#      writes there when a builder draft is activated, as user 10001:
+#        sudo chown -R 10001:10001 automations
 #   2. Copy pendolo.example.yaml to pendolo.yaml and set your models.
 #   3. Put secrets in ./secrets, one file per secret, and create the runner
 #      token and the master key that encrypts secrets saved in the dashboard:
@@ -20,7 +22,8 @@ services:
       TZ: ${TZ:-Europe/Rome}
     volumes:
       - pendolo-data:/data
-      - ./automations:/automations:ro
+      # Read-write: activating a draft from the AI builder writes its folder.
+      - ./automations:/automations
       - ./pendolo.yaml:/etc/pendolo/pendolo.yaml:ro
       - ./secrets:/run/secrets:ro
     ports:

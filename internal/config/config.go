@@ -32,6 +32,7 @@ type Config struct {
 	Heartbeat Heartbeat           `yaml:"heartbeat"`
 	Secrets   Secrets             `yaml:"secrets"`
 	Retention Retention           `yaml:"retention"`
+	Builder   Builder             `yaml:"builder"`
 	Providers map[string]Provider `yaml:"providers"`
 	Models    map[string]Model    `yaml:"models"`
 }
@@ -133,6 +134,14 @@ type Retention struct {
 	Runs Duration `yaml:"runs"`
 }
 
+// Builder configures the AI builder of the dashboard.
+type Builder struct {
+	// Model is the alias (or provider/model) that writes automations.
+	Model string `yaml:"model"`
+	// Disabled hides the builder even when a model is configured.
+	Disabled bool `yaml:"disabled"`
+}
+
 // Provider is a language model API.
 type Provider struct {
 	// Type is "anthropic" or "openai" (any OpenAI-compatible API: OpenAI,
@@ -191,6 +200,7 @@ func Defaults() Config {
 		Secrets:        Secrets{Dir: "/run/secrets", EnvPrefix: "PENDOLO_SECRET_", MasterKeyFile: "/run/secrets/pendolo-master-key"},
 		Auth:           Auth{SessionTTL: Duration(14 * 24 * time.Hour)},
 		Retention:      Retention{Runs: Duration(90 * 24 * time.Hour)},
+		Builder:        Builder{Model: "smart"},
 	}
 }
 

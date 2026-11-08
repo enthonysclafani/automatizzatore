@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/enthonysclafani/automatizzatore/internal/auth"
+	"github.com/enthonysclafani/automatizzatore/internal/builder"
 	"github.com/enthonysclafani/automatizzatore/internal/config"
 	"github.com/enthonysclafani/automatizzatore/internal/connectors"
 	"github.com/enthonysclafani/automatizzatore/internal/engine"
@@ -56,7 +57,13 @@ type API struct {
 	Health func(ctx context.Context) Health
 	// Wake tells the workers that a run was queued.
 	Wake func()
-	Now  func() time.Time
+	// Engine executes dry runs of drafts.
+	Engine *engine.Engine
+	// Builder writes automations; nil when no model is configured for it.
+	Builder *builder.Builder
+	// Reload re-reads the automations folder after a draft is activated.
+	Reload func(ctx context.Context) error
+	Now    func() time.Time
 
 	loginByIP    auth.Limiter
 	loginByEmail auth.Limiter
@@ -69,6 +76,9 @@ type API struct {
 
 	oauthMu     sync.Mutex
 	oauthStates map[string]oauthState
+
+	// draftBusy holds the ids of drafts the builder is working on.
+	draftBusy sync.Map
 }
 
 // New returns an API with its rate limits set.
@@ -108,7 +118,9 @@ const (
 	permSecretsWrite = "secrets.write" // create, change, delete secrets
 	permManage       = "manage"        // members, audit log, connections, settings
 	permConnTest     = "connections.test"
-	permApprove      = "approve" // further limited by the approval's own approvers
+	permApprove      = "approve"  // further limited by the approval's own approvers
+	permBuild        = "build"    // write drafts with the AI builder, dry-run and propose them
+	permActivate     = "activate" // turn a draft into a running automation
 )
 
 // RoleOwner is the effective role of instance owners in every workspace.
@@ -119,7 +131,7 @@ func can(role, perm string) bool {
 	case RoleOwner, store.RoleAdmin:
 		return true
 	case store.RoleBuilder:
-		return perm == permView || perm == permOperate || perm == permSecretsRead || perm == permConnTest
+		return perm == permView || perm == permOperate || perm == permSecretsRead || perm == permConnTest || perm == permBuild
 	case store.RoleApprover:
 		return perm == permView || perm == permApprove
 	case store.RoleViewer:
@@ -184,6 +196,18 @@ func (a *API) Handler() http.Handler {
 	ws("GET /api/v1/workspaces/{ws}/approvals", permView, a.listApprovals)
 	ws("POST /api/v1/workspaces/{ws}/approvals/{id}/approve", permApprove, a.approve)
 	ws("POST /api/v1/workspaces/{ws}/approvals/{id}/reject", permApprove, a.reject)
+	ws("GET /api/v1/workspaces/{ws}/automations/{name}/versions", permView, a.listVersions)
+	ws("GET /api/v1/workspaces/{ws}/automations/{name}/versions/{hash}", permView, a.getVersion)
+	ws("GET /api/v1/workspaces/{ws}/builder", permBuild, a.getBuilder)
+	ws("GET /api/v1/workspaces/{ws}/drafts", permBuild, a.listDrafts)
+	ws("POST /api/v1/workspaces/{ws}/drafts", permBuild, a.createDraft)
+	ws("GET /api/v1/workspaces/{ws}/drafts/{id}", permBuild, a.getDraft)
+	ws("POST /api/v1/workspaces/{ws}/drafts/{id}/messages", permBuild, a.postDraftMessage)
+	ws("PUT /api/v1/workspaces/{ws}/drafts/{id}/files", permBuild, a.putDraftFiles)
+	ws("POST /api/v1/workspaces/{ws}/drafts/{id}/dry-run", permBuild, a.dryRunDraft)
+	ws("POST /api/v1/workspaces/{ws}/drafts/{id}/propose", permBuild, a.proposeDraft)
+	ws("POST /api/v1/workspaces/{ws}/drafts/{id}/discard", permBuild, a.discardDraft)
+	ws("POST /api/v1/workspaces/{ws}/drafts/{id}/activate", permActivate, a.activateDraft)
 	ws("GET /api/v1/workspaces/{ws}/settings", permView, a.getSettings)
 	ws("PATCH /api/v1/workspaces/{ws}/settings", permManage, a.patchSettings)
 

@@ -33,6 +33,7 @@ steps:
     run: 'echo "ran on $(cat /etc/hostname)"'
 YAML
 chmod -R a+rX automations secrets pendolo.yaml
+chmod a+w automations # the server writes activated drafts here
 
 docker compose up -d --no-build
 for _ in $(seq 1 30); do
@@ -40,6 +41,13 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 docker compose exec -T pendolo pendolo healthcheck
+
+# The server can write automations (builder activations); the runner cannot.
+docker compose exec -T pendolo sh -c 'touch /automations/.write-test && rm /automations/.write-test'
+if docker compose exec -T runner sh -c 'touch /automations/.write-test' 2>/dev/null; then
+  echo "the runner can write to the automations folder" >&2
+  exit 1
+fi
 
 docker compose exec -T pendolo pendolo trigger hello
 for _ in $(seq 1 30); do

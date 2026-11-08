@@ -9,9 +9,9 @@ Pendolo is a self-hosted automation engine. You describe what you want in plain 
 - **Runs anywhere.** One binary and one container image for Linux, macOS and Windows, on amd64 and arm64.
 - **Transparent.** Every run, step, model call, cost and approval is recorded.
 
-**Status: phase 3 complete.** Connectors (Gmail, Google Docs, Slack, web search, any MCP server), agent steps that work with tools, approvals that pause a run until a person decides, autonomy levels enforced on every action, and email triggers; on top of the dashboard (phase 2) and the engine (phase 1).
+**Status: phase 4 complete (v0.1 candidate).** The AI builder: describe an automation in plain language in the dashboard; Pendolo writes it as files, checks them, tests them with a dry run that only reads, and an admin activates it. Every version is kept and can be restored. On top of connectors and approvals (phase 3), the dashboard (phase 2) and the engine (phase 1).
 
-The engine runs schedules and webhook triggers through a run queue, with `http`, `shell`, `llm` and `foreach` steps, any model provider, secrets, scripts isolated in a separate runner container, notifications by webhook, Slack, Telegram and email, and full run history in SQLite. The AI builder comes next; see the [roadmap](#roadmap).
+The engine runs schedules, webhooks and email triggers through a run queue, with `http`, `shell`, `llm`, `agent`, `connector`, `approval` and `foreach` steps, any model provider, secrets, scripts isolated in a separate runner container, notifications by webhook, Slack, Telegram and email, and full run history in SQLite. See the [roadmap](#roadmap).
 
 ## Try it
 
@@ -94,6 +94,7 @@ internal/notify/      run notifications
 internal/server/      wires it all into a long-running process
 internal/api/         the dashboard's JSON API: sign-in, roles, workspaces, connections, approvals
 internal/connectors/  Gmail, Google Docs, Slack, web search, MCP; actions and their risk
+internal/builder/     the AI builder: plain language to automation files, checks, installation
 internal/e2e/         templates run end to end against fake services
 internal/testfakes/   fake Gmail, Docs, Slack, search, MCP server and model for tests
 internal/auth/        passwords, two-factor codes, tokens, rate limits
@@ -102,7 +103,7 @@ internal/webui/       the built dashboard, embedded in the binary
 web/                  the dashboard (React, TypeScript, Vite)
 internal/config/      pendolo.yaml
 spec/                 JSON Schema of the manifest (source of truth)
-templates/            ready-made automations
+templates/            ready-made automations (embedded: the builder starts from them)
 deploy/               Docker Compose and an example configuration
 docs/                 documentation
 ```
@@ -115,7 +116,7 @@ docs/                 documentation
 | 1. Engine (done) | Scheduler, queue, http/shell/llm steps, SQLite, `pendolo run` | Site checks run for 7 days without stopping |
 | 2. Dashboard (done) | Login, OIDC, roles, workspaces, encrypted secrets, run timeline, costs | A viewer sees only their own workspace |
 | 3. Connectors (done) | Gmail with a setup wizard, Slack, Google Docs, MCP, agent and approval steps | Email triage and editorial plan run end to end |
-| 4. Builder and v0.1 | Plain language to manifest, templates, multi-arch image, security review | A sentence becomes an active automation |
+| 4. Builder and v0.1 (done) | Plain language to manifest, templates, multi-arch image, security review | A sentence becomes an active automation |
 
 ## License
 
